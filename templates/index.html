@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07172b">
+  <title>GameSheet Assistant</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-wrap">
+      <div class="brand-mark" aria-hidden="true">🏒</div>
+      <div>
+        <p class="eyebrow">MINNESOTA HOCKEY DATA ENTRY</p>
+        <h1>GameSheet Assistant</h1>
+      </div>
+    </div>
+    <div class="top-actions">
+      <div id="connectionBadge" class="status-pill"><span class="status-dot"></span>Ready</div>
+      <button id="themeToggle" class="icon-button" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">◐</button>
+      {% if auth_enabled %}
+      <form method="post" action="{{ url_for('logout') }}"><button class="ghost-on-dark" type="submit">Sign out</button></form>
+      {% endif %}
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <aside class="sidebar card">
+      <div class="sidebar-section">
+        <p class="eyebrow">QUICK IMPORT</p>
+        <label for="gameInput">SportsEngine URL or game ID</label>
+        <input id="gameInput" type="text" placeholder="Example: 29033388" autocomplete="off">
+        <button id="importButton" class="primary full-width">Import Game</button>
+        <div id="errorBox" class="error hidden"></div>
+      </div>
+
+      <div class="sidebar-section compact">
+        <p class="eyebrow">SESSION</p>
+        <div class="metric-grid">
+          <div class="metric"><span id="sessionCompleted">0</span><small>Completed</small></div>
+          <div class="metric"><span id="sessionRemaining">0</span><small>Remaining</small></div>
+        </div>
+      </div>
+
+      <div class="sidebar-section compact">
+        <p class="eyebrow">WORKFLOW SETTINGS</p>
+        <label class="toggle-row"><input id="autoCopyToggle" type="checkbox"><span>Copy step automatically on Next</span></label>
+        <label class="toggle-row"><input id="compactModeToggle" type="checkbox"><span>Compact workflow card</span></label>
+      </div>
+
+      <div class="sidebar-tip">
+        <strong>Keyboard shortcuts</strong>
+        <span>← Previous step</span>
+        <span>→ Next step</span>
+      </div>
+    </aside>
+
+    <section class="main-column">
+      <section id="emptyState" class="empty-state card">
+        <div class="empty-icon">🏒</div>
+        <p class="eyebrow">READY TO IMPORT</p>
+        <h2>Turn a SportsEngine box score into a GameSheet workflow</h2>
+        <p>Import one game or load a full batch. The assistant prepares shots, goalies, goals, penalties, validation, and step-by-step entry instructions.</p>
+      </section>
+
+      <section id="gameWorkspace" class="hidden">
+        <section class="scoreboard card">
+          <div class="team-block">
+            <span>Away</span>
+            <strong id="awayTeam"></strong>
+            <b id="awayScore"></b>
+          </div>
+          <div class="score-center"><span>FINAL</span><i>vs</i></div>
+          <div class="team-block home">
+            <span>Home</span>
+            <strong id="homeTeam"></strong>
+            <b id="homeScore"></b>
+          </div>
+          <div class="game-meta"><span id="gameDate"></span><span id="venue"></span></div>
+        </section>
+
+        <nav class="tabs card" aria-label="Game sections">
+          <button class="tab active" data-tab="workflow">Workflow</button>
+          <button class="tab" data-tab="summary">Summary</button>
+          <button class="tab" data-tab="goals">Goals</button>
+          <button class="tab" data-tab="penalties">Penalties</button>
+          <button class="tab" data-tab="goalies">Goalies</button>
+          <button class="tab" data-tab="validation">Validation</button>
+          <button class="tab" data-tab="batch">Batch</button>
+        </nav>
+
+        <section id="workflow" class="tab-panel active card workflow-panel">
+          <div class="panel-head">
+            <div><p id="workflowCounter" class="eyebrow"></p><h2 id="workflowTitle"></h2></div>
+            <span id="workflowPercent" class="percent"></span>
+          </div>
+          <div class="progress-track" aria-label="Workflow progress"><div id="workflowProgress" class="progress-fill"></div></div>
+          <article id="workflowCard" class="workflow-card">
+            <pre id="workflowBody" class="workflow-body"></pre>
+          </article>
+          <div class="button-row">
+            <button id="previousStep">← Previous</button>
+            <button id="copyStep">Copy Step</button>
+            <button id="nextStep" class="primary">Next →</button>
+          </div>
+        </section>
+
+        <section id="summary" class="tab-panel card"></section>
+        <section id="goals" class="tab-panel card"></section>
+        <section id="penalties" class="tab-panel card"></section>
+        <section id="goalies" class="tab-panel card"></section>
+        <section id="validation" class="tab-panel card"></section>
+
+        <section id="batch" class="tab-panel card">
+          <div class="panel-head">
+            <div><p class="eyebrow">MULTI-GAME QUEUE</p><h2>Batch Manager</h2></div>
+            <span id="batchStatus" class="percent">0 games</span>
+          </div>
+          <div class="batch-stats">
+            <div><strong id="batchCompletedCount">0</strong><span>Completed</span></div>
+            <div><strong id="batchCurrentCount">0</strong><span>Current</span></div>
+            <div><strong id="batchRemainingCount">0</strong><span>Remaining</span></div>
+            <div><strong id="batchSkippedCount">0</strong><span>Skipped</span></div>
+          </div>
+          <textarea id="batchInput" rows="8" placeholder="Paste one SportsEngine URL or game ID per line"></textarea>
+          <div class="button-row left">
+            <button id="loadBatch" class="primary">Load Batch</button>
+            <button id="previousGame">Previous Game</button>
+            <button id="skipGame">Skip Game</button>
+            <button id="nextGame">Complete & Next</button>
+            <button id="clearBatch" class="danger-ghost">Clear Batch</button>
+          </div>
+          <div id="batchLog" class="batch-log"></div>
+        </section>
+      </section>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

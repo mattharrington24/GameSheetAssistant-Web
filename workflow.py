@@ -32,14 +32,46 @@ def build_entry_steps(game, shots, goals, penalties, goalies):
             ),
         })
 
-    shot_lines = [
-        f"{period}: {shots['away'][index]} - {shots['home'][index]}"
-        for index, period in enumerate(shots.get("periods", []))
-    ]
-    shot_lines.append(f"Total: {shots['away'][-1]} - {shots['home'][-1]}")
+    def shot_comparison(label, away_value, home_value):
+        away_shots = int(away_value)
+        home_shots = int(home_value)
+
+        lines = [
+            label,
+            f"{shots['away_team']}: {away_shots}",
+            f"{shots['home_team']}: {home_shots}",
+        ]
+
+        if away_shots > home_shots:
+            lines.append(f"Leader: {shots['away_team']} (+{away_shots - home_shots})")
+        elif home_shots > away_shots:
+            lines.append(f"Leader: {shots['home_team']} (+{home_shots - away_shots})")
+        else:
+            lines.append("Leader: Tie")
+
+        return "\n".join(lines)
+
+    shot_sections = []
+    for index, period in enumerate(shots.get("periods", [])):
+        shot_sections.append(
+            shot_comparison(
+                f"{period} Period",
+                shots["away"][index],
+                shots["home"][index],
+            )
+        )
+
+    shot_sections.append(
+        shot_comparison(
+            "Game Total",
+            shots["away"][-1],
+            shots["home"][-1],
+        )
+    )
+
     steps.append({
-        "title": "Shots by Period",
-        "body": "\n".join(shot_lines),
+        "title": "Shots on Goal",
+        "body": "\n\n".join(shot_sections),
     })
 
     for number, goal in enumerate(goals, start=1):

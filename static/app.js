@@ -62,8 +62,16 @@ function renderAll(){
   $('awayTeam').textContent=game.away_team;$('awayScore').textContent=game.away_score;
   $('homeTeam').textContent=game.home_team;$('homeScore').textContent=game.home_score;
   $('gameDate').textContent=game.date;$('venue').textContent=game.venue;renderWorkflow();
-  const shotRows=shots.periods.map((p,i)=>`<p><strong>${escapeHtml(p)}</strong>: ${shots.away[i]} – ${shots.home[i]}</p>`).join('');
-  $('summary').innerHTML=`<div class="panel-head"><div><p class="eyebrow">GAME OVERVIEW</p><h2>Summary</h2></div></div><div class="data-grid"><div class="data-card"><h3>Shots</h3>${shotRows}<p><strong>Total</strong>: ${shots.away.at(-1)} – ${shots.home.at(-1)}</p></div><div class="data-card"><h3>Parsed Events</h3><p>${goals.length} goals</p><p>${penalties.length} penalties</p><p>${goalies.length} goalie records</p></div></div>`;
+  const shotComparison=(label,awayValue,homeValue)=>{
+    const awayShots=Number(awayValue);const homeShots=Number(homeValue);
+    let leader='Tie';let awayClass='';let homeClass='';
+    if(awayShots>homeShots){leader=`${shots.away_team} (+${awayShots-homeShots})`;awayClass=' leader';}
+    else if(homeShots>awayShots){leader=`${shots.home_team} (+${homeShots-awayShots})`;homeClass=' leader';}
+    return `<section class="shot-period"><h4>${escapeHtml(label)}</h4><div class="shot-team${awayClass}"><span>${escapeHtml(shots.away_team)}</span><strong>${awayShots}</strong></div><div class="shot-team${homeClass}"><span>${escapeHtml(shots.home_team)}</span><strong>${homeShots}</strong></div><p class="shot-leader">${leader==='Tie'?'Tie':`Leader: ${escapeHtml(leader)}`}</p></section>`;
+  };
+  const shotRows=shots.periods.map((p,i)=>shotComparison(`${p} Period`,shots.away[i],shots.home[i])).join('');
+  const shotTotal=shotComparison('Game Total',shots.away.at(-1),shots.home.at(-1));
+  $('summary').innerHTML=`<div class="panel-head"><div><p class="eyebrow">GAME OVERVIEW</p><h2>Summary</h2></div></div><div class="data-grid summary-grid"><div class="data-card shots-card"><h3>Shots on Goal</h3><div class="shots-grid">${shotRows}${shotTotal}</div></div><div class="data-card"><h3>Parsed Events</h3><p>${goals.length} goals</p><p>${penalties.length} penalties</p><p>${goalies.length} goalie records</p></div></div>`;
   $('goals').innerHTML=panelCards('Goals',goals.map((g,i)=>({title:`Goal ${i+1}`,lines:[`${g.period} — ${g.remaining} remaining`,g.team,`Scorer: ${g.scorer}`,`Assists: ${g.assists.join(', ')||'None'}`,`<span class="strength">${escapeHtml(g.strength)}</span>`]})));
   $('penalties').innerHTML=panelCards('Penalties',penalties.map((p,i)=>({title:`Penalty ${i+1}`,lines:[`${p.period} — ${p.remaining} remaining`,p.team,`Player: ${p.player}`,p.penalty]})));
   $('goalies').innerHTML=panelCards('Goalies',goalies.map(g=>({title:`#${g.number} ${g.name}`,lines:[g.team,`${g.minutes} played`,`${g.shots_against} SA · ${g.goals_against} GA · ${g.saves} saves`,`Save %: ${g.save_percentage}`]})));

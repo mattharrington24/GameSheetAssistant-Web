@@ -61,3 +61,8 @@ docker run --rm -p 5000:5000 \
 - Set `APP_PASSWORD` before sharing the URL.
 - Do not commit passwords or secrets to GitHub.
 - Confirm your intended use of SportsEngine pages complies with applicable access policies.
+
+
+## Finish-game safety
+
+The final workflow step asks for confirmation before marking a game complete. After completion, an **Undo** action remains available for 30 seconds and restores the most recently completed game to its final workflow step.

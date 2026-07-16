@@ -49,6 +49,8 @@ button { border:1px solid #b8c8d8; background:var(--surface); color:var(--ink); 
 button:hover { transform:translateY(-1px); box-shadow:0 7px 18px rgba(16,43,71,.16); }
 button:disabled { opacity:.42; cursor:not-allowed; transform:none; box-shadow:none; }
 button.primary { background:linear-gradient(135deg,var(--blue),#1f68da); color:white; border-color:transparent; }
+button.success { background:linear-gradient(135deg,#16a66a,#0f8756); color:white; border-color:transparent; }
+.workflow-actions { display:flex; gap:10px; justify-content:center; }
 button.danger-ghost { color:var(--bad); border-color:rgba(180,35,24,.25); }
 .error { background:#fff1f0; color:var(--bad); padding:11px; border-radius:11px; border:1px solid #f4c7c3; font-size:.9rem; }
 .hidden { display:none!important; }

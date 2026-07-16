@@ -1,6 +1,6 @@
 const STORAGE_KEY = 'gsa-web-state-v3';
 const PREF_KEY = 'gsa-web-preferences-v1';
-const state = { data:null, workflowIndex:0, batch:[], batchIndex:-1, completed:new Set(), skipped:new Set() };
+const state = { data:null, workflowIndex:0, batch:[], batchIndex:-1, completed:new Set(), skipped:new Set(), standaloneCompleted:0 };
 const prefs = { autoCopy:false, compact:false, theme:'light' };
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (value='') => String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
@@ -8,7 +8,7 @@ const escapeHtml = (value='') => String(value).replace(/[&<>'"]/g, c => ({'&':'&
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     data:state.data, workflowIndex:state.workflowIndex, batch:state.batch,
-    batchIndex:state.batchIndex, completed:[...state.completed], skipped:[...state.skipped],
+    batchIndex:state.batchIndex, completed:[...state.completed], skipped:[...state.skipped], standaloneCompleted:state.standaloneCompleted,
   }));
 }
 function savePrefs() { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); }
@@ -25,7 +25,7 @@ function restoreState() {
     state.data=saved.data||null; state.workflowIndex=Number(saved.workflowIndex||0);
     state.batch=Array.isArray(saved.batch)?saved.batch:[];
     state.batchIndex=Number.isInteger(saved.batchIndex)?saved.batchIndex:-1;
-    state.completed=new Set(saved.completed||[]); state.skipped=new Set(saved.skipped||[]);
+    state.completed=new Set(saved.completed||[]); state.skipped=new Set(saved.skipped||[]); state.standaloneCompleted=Number(saved.standaloneCompleted||0);
     $('batchInput').value=state.batch.join('\n');
     if(state.data){$('emptyState').classList.add('hidden');$('gameWorkspace').classList.remove('hidden');renderAll();}
     updateBatchStatus(); updateSessionMetrics();
@@ -63,12 +63,52 @@ function renderWorkflow(){
   const steps=state.data?.workflow||[];if(!steps.length)return;
   const i=Math.max(0,Math.min(state.workflowIndex,steps.length-1));state.workflowIndex=i;const step=steps[i];const pct=Math.round(((i+1)/steps.length)*100);
   $('workflowCounter').textContent=`STEP ${i+1} OF ${steps.length}`;$('workflowTitle').textContent=step.title;$('workflowBody').textContent=step.body;
-  $('workflowPercent').textContent=`${pct}%`;$('workflowProgress').style.width=`${pct}%`;$('previousStep').disabled=i===0;$('nextStep').disabled=i===steps.length-1;saveState();
+  const isFinal=i===steps.length-1; const currentBatchDone=state.batchIndex>=0&&state.completed.has(state.batchIndex);
+  $('workflowPercent').textContent=`${pct}%`;$('workflowProgress').style.width=`${pct}%`;$('previousStep').disabled=i===0;
+  $('nextStep').classList.toggle('hidden',isFinal); $('finishGame').classList.toggle('hidden',!isFinal||currentBatchDone); saveState();
 }
 async function changeWorkflow(delta){
   if(!state.data)return;const next=Math.max(0,Math.min(state.workflowIndex+delta,state.data.workflow.length-1));
   if(next===state.workflowIndex)return;state.workflowIndex=next;renderWorkflow();if(delta>0&&prefs.autoCopy)await copyCurrentStep();
 }
+
+function resetForNextImport(message='Game completed. Ready for the next game.') {
+  state.data=null; state.workflowIndex=0;
+  $('gameWorkspace').classList.add('hidden'); $('emptyState').classList.remove('hidden');
+  $('gameInput').value=''; $('gameInput').focus(); saveState(); updateSessionMetrics(); showToast(message);
+}
+
+async function finishCurrentGame(){
+  if(!state.data)return;
+  const steps=state.data.workflow||[];
+  if(!steps.length||state.workflowIndex!==steps.length-1)return;
+
+  if(state.batch.length&&state.batchIndex>=0){
+    const current=state.batchIndex;
+    state.skipped.delete(current);
+    state.completed.add(current);
+    const next=current+1;
+    updateBatchStatus(); saveState();
+    if(next<state.batch.length){
+      state.batchIndex=next; updateBatchStatus(); saveState();
+      showToast('Game completed. Loading next game…');
+      await importGame(state.batch[next],{fromBatch:true});
+      selectTab('workflow');
+    }else{
+      renderWorkflow();
+      $('workflowCounter').textContent='BATCH COMPLETE';
+      $('workflowTitle').textContent='All games completed';
+      $('workflowBody').textContent=`${state.completed.size} game${state.completed.size===1?'':'s'} completed. You can start a new batch whenever you are ready.`;
+      $('finishGame').classList.add('hidden'); $('nextStep').classList.add('hidden');
+      showToast('Batch complete!');
+    }
+    return;
+  }
+
+  state.standaloneCompleted+=1;
+  resetForNextImport('Game completed. Ready for the next game.');
+}
+
 function selectTab(name){document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===name));document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active',p.id===name));}
 function showError(message){$('errorBox').textContent=message;$('errorBox').classList.toggle('hidden',!message);}
 function setLoading(loading){$('importButton').disabled=loading;$('importButton').textContent=loading?'Importing…':'Import Game';$('connectionBadge').lastChild.textContent=loading?'Working…':'Ready';}
@@ -83,7 +123,7 @@ function moveGame(delta,{skip=false}={}){
 }
 function clearBatch(){if(!confirm('Clear the current batch and its progress?'))return;state.batch=[];state.batchIndex=-1;state.completed.clear();state.skipped.clear();$('batchInput').value='';updateBatchStatus();saveState();showToast('Batch cleared');}
 function updateSessionMetrics(){
-  $('sessionCompleted').textContent=state.completed.size;
+  $('sessionCompleted').textContent=state.completed.size+state.standaloneCompleted;
   $('sessionRemaining').textContent=Math.max(0,state.batch.length-state.completed.size-state.skipped.size);
 }
 function updateBatchStatus(){
@@ -97,7 +137,7 @@ function updateBatchStatus(){
 $('importButton').addEventListener('click',()=>importGame($('gameInput').value));
 $('gameInput').addEventListener('keydown',e=>{if(e.key==='Enter')importGame(e.target.value)});
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>selectTab(b.dataset.tab)));
-$('previousStep').addEventListener('click',()=>changeWorkflow(-1));$('nextStep').addEventListener('click',()=>changeWorkflow(1));$('copyStep').addEventListener('click',copyCurrentStep);
+$('previousStep').addEventListener('click',()=>changeWorkflow(-1));$('nextStep').addEventListener('click',()=>changeWorkflow(1));$('copyStep').addEventListener('click',copyCurrentStep);$('finishGame').addEventListener('click',finishCurrentGame);
 $('loadBatch').addEventListener('click',loadBatch);$('previousGame').addEventListener('click',()=>moveGame(-1));$('skipGame').addEventListener('click',()=>moveGame(1,{skip:true}));$('nextGame').addEventListener('click',()=>moveGame(1));$('clearBatch').addEventListener('click',clearBatch);
 $('autoCopyToggle').addEventListener('change',e=>{prefs.autoCopy=e.target.checked;savePrefs();showToast(prefs.autoCopy?'Auto-copy enabled':'Auto-copy disabled');});
 $('compactModeToggle').addEventListener('change',e=>{prefs.compact=e.target.checked;document.body.classList.toggle('compact-workflow',prefs.compact);savePrefs();});

@@ -125,3 +125,13 @@ button.danger-ghost { color:var(--bad); border-color:rgba(180,35,24,.25); }
 .shot-team.leader strong { color:var(--good); }
 .shot-leader { margin:9px 3px 0!important; padding-top:8px; border-top:1px solid var(--line); font-size:.82rem; font-weight:850; color:var(--ink)!important; }
 @media (max-width:760px) { .summary-grid { grid-template-columns:1fr; } .shots-grid { grid-template-columns:1fr; } }
+
+/* Version 2 period-based workflow */
+.workflow-team { display:block; font-size:1.45rem; line-height:1.25; color:var(--navy-2); font-weight:950; text-transform:uppercase; letter-spacing:.025em; }
+[data-theme="dark"] .workflow-team { color:var(--blue-2); }
+.workflow-card.kind-goal::before { background:linear-gradient(180deg,#16885c,#20b477); }
+.workflow-card.kind-penalty::before { background:linear-gradient(180deg,#c44736,#e36a58); }
+.workflow-card.kind-shots::before { background:linear-gradient(180deg,#6b55bd,#8e75df); }
+.workflow-card.kind-goalie-start::before,.workflow-card.kind-goalie-review::before { background:linear-gradient(180deg,#bd7d16,#e2a53c); }
+.workflow-card.workflow-warning { border-color:rgba(196,71,54,.48); }
+.workflow-card.workflow-warning .workflow-body { background:linear-gradient(135deg,rgba(196,71,54,.06),transparent 55%); }

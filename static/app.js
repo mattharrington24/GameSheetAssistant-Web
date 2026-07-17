@@ -81,7 +81,11 @@ function panelCards(title,cards){return `<div class="panel-head"><div><p class="
 function renderWorkflow(){
   const steps=state.data?.workflow||[];if(!steps.length)return;
   const i=Math.max(0,Math.min(state.workflowIndex,steps.length-1));state.workflowIndex=i;const step=steps[i];const pct=Math.round(((i+1)/steps.length)*100);
-  $('workflowCounter').textContent=`STEP ${i+1} OF ${steps.length}`;$('workflowTitle').textContent=step.title;$('workflowBody').textContent=step.body;
+  $('workflowCounter').textContent=`STEP ${i+1} OF ${steps.length}`;$('workflowTitle').textContent=step.title;
+  const team=step.team?`<strong class="workflow-team">${escapeHtml(step.team)}</strong>`:'';
+  const warning=step.warning?' workflow-warning':'';
+  $('workflowCard').className=`workflow-card kind-${escapeHtml(step.kind||'standard')}${warning}`;
+  $('workflowBody').innerHTML=`${team}${team?'\n\n':''}${escapeHtml(step.body)}`;
   const isFinal=i===steps.length-1; const currentBatchDone=state.batchIndex>=0&&state.completed.has(state.batchIndex);
   $('workflowPercent').textContent=`${pct}%`;$('workflowProgress').style.width=`${pct}%`;$('previousStep').disabled=i===0;
   $('nextStep').classList.toggle('hidden',isFinal); $('finishGame').classList.toggle('hidden',!isFinal||currentBatchDone); saveState();

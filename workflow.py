@@ -33,16 +33,24 @@ def build_entry_steps(game, shots, goals, penalties, goalies):
         })
 
     def shot_comparison(label, away_value, home_value):
-        away_shots = int(away_value)
-        home_shots = int(home_value)
+        def parse_shots(value):
+            text = str(value).strip()
+            return int(text) if text.isdigit() else None
+
+        away_shots = parse_shots(away_value)
+        home_shots = parse_shots(home_value)
+        away_display = away_shots if away_shots is not None else "-"
+        home_display = home_shots if home_shots is not None else "-"
 
         lines = [
             label,
-            f"{shots['away_team']}: {away_shots}",
-            f"{shots['home_team']}: {home_shots}",
+            f"{shots['away_team']}: {away_display}",
+            f"{shots['home_team']}: {home_display}",
         ]
 
-        if away_shots > home_shots:
+        if away_shots is None or home_shots is None:
+            lines.append("Leader: Not available")
+        elif away_shots > home_shots:
             lines.append(f"Leader: {shots['away_team']} (+{away_shots - home_shots})")
         elif home_shots > away_shots:
             lines.append(f"Leader: {shots['home_team']} (+{home_shots - away_shots})")

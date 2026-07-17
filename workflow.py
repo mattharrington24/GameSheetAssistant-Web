@@ -80,8 +80,11 @@ def _mark_early_releases(goals: list[dict], penalties: list[dict]) -> tuple[list
             penalty_index = candidates[0][0]
             penalties[penalty_index]["release_at"] = goal.get("remaining", "")
             penalties[penalty_index]["release_reason"] = "Power-play goal"
-            goal["release_player"] = penalties[penalty_index].get("player", "Penalized player")
-            goal["release_team"] = penalties[penalty_index].get("team", "")
+            linked_penalty = penalties[penalty_index]
+            goal["release_player"] = linked_penalty.get("player", "Penalized player")
+            goal["release_team"] = linked_penalty.get("team", "")
+            goal["release_penalty"] = linked_penalty.get("penalty", "Minor penalty")
+            goal["release_off_time"] = linked_penalty.get("remaining", "")
         elif len(candidates) > 1:
             goal["release_review"] = True
             for penalty_index, _ in candidates:
@@ -192,9 +195,13 @@ def build_entry_steps(game, shots, goals, penalties, goalies):
                 warning = ""
                 if event.get("release_player"):
                     warning = (
-                        "\n\n⚠ POWER-PLAY RELEASE\n"
-                        f"Return {event['release_player']} ({event['release_team']}) to the ice at "
-                        f"{event['remaining']} remaining."
+                        "\n\n⚠ POWER-PLAY GOAL REMINDER\n"
+                        f"You need to set the On time to {event['remaining']} for this specific penalty:\n"
+                        f"{event['release_player']} — {event.get('release_penalty', 'Minor penalty')} "
+                        f"({event['release_team']})\n"
+                        f"Off: {event.get('release_off_time') or 'Confirm in GameSheet'}\n"
+                        f"On: {event['remaining']}\n\n"
+                        "This penalty ends early because of the power-play goal."
                     )
                 elif event.get("release_review"):
                     warning = "\n\n⚠ REVIEW RELEASE TIME\nMultiple opponent minors may be active. Confirm which player returns."

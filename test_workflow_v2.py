@@ -32,7 +32,10 @@ def test_pp_goal_marks_minor_for_early_release():
     penalty=next(s for s in steps if s["kind"]=="penalty")
     goal=next(s for s in steps if s["kind"]=="goal")
     assert "Set Back On Ice to 7:00" in penalty["body"]
-    assert "Return #2 B" in goal["body"]
+    assert "You need to set the On time to 7:00 for this specific penalty" in goal["body"]
+    assert "#2 B — Tripping - Minor (2:00)" in goal["body"]
+    assert "Off: 7:28" in goal["body"]
+    assert "On: 7:00" in goal["body"]
     assert penalty["warning"] and goal["warning"]
 
 

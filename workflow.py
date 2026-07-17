@@ -56,8 +56,10 @@ def _mark_early_releases(goals: list[dict], penalties: list[dict]) -> tuple[list
 
     SportsEngine sometimes reports minor duration as 0:0. It still represents a
     standard minor in the source layout, so the workflow treats it as two minutes.
-    Ambiguous multi-penalty situations are flagged for confirmation rather than
-    silently choosing a release.
+    When multiple opponent minors are active (for example, a 5-on-3), the
+    earliest active minor is the one released by a power-play goal. A manual
+    review is required only when the earliest candidates began at the exact
+    same time and the source data cannot distinguish which penalty should end.
     """
     goals = deepcopy(goals)
     penalties = deepcopy(penalties)
@@ -76,19 +78,28 @@ def _mark_early_releases(goals: list[dict], penalties: list[dict]) -> tuple[list
             if start <= goal_time < start + 120 and not penalty.get("release_at"):
                 candidates.append((index, start))
 
-        if len(candidates) == 1:
-            penalty_index = candidates[0][0]
-            penalties[penalty_index]["release_at"] = goal.get("remaining", "")
-            penalties[penalty_index]["release_reason"] = "Power-play goal"
-            linked_penalty = penalties[penalty_index]
-            goal["release_player"] = linked_penalty.get("player", "Penalized player")
-            goal["release_team"] = linked_penalty.get("team", "")
-            goal["release_penalty"] = linked_penalty.get("penalty", "Minor penalty")
-            goal["release_off_time"] = linked_penalty.get("remaining", "")
-        elif len(candidates) > 1:
-            goal["release_review"] = True
-            for penalty_index, _ in candidates:
-                penalties[penalty_index]["release_review"] = True
+        if candidates:
+            # On a power-play goal, the earliest active non-coincidental minor
+            # is released. This also applies when two minors create a 5-on-3.
+            candidates.sort(key=lambda candidate: candidate[1])
+            earliest_start = candidates[0][1]
+            earliest = [candidate for candidate in candidates if candidate[1] == earliest_start]
+
+            if len(earliest) == 1:
+                penalty_index = earliest[0][0]
+                penalties[penalty_index]["release_at"] = goal.get("remaining", "")
+                penalties[penalty_index]["release_reason"] = "Power-play goal"
+                linked_penalty = penalties[penalty_index]
+                goal["release_player"] = linked_penalty.get("player", "Penalized player")
+                goal["release_team"] = linked_penalty.get("team", "")
+                goal["release_penalty"] = linked_penalty.get("penalty", "Minor penalty")
+                goal["release_off_time"] = linked_penalty.get("remaining", "")
+            else:
+                # Simultaneous earliest minors cannot be resolved safely from
+                # the SportsEngine summary alone.
+                goal["release_review"] = True
+                for penalty_index, _ in earliest:
+                    penalties[penalty_index]["release_review"] = True
     return goals, penalties
 
 

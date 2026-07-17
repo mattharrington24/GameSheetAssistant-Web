@@ -45,3 +45,33 @@ def test_missing_shots_stay_safe():
     shot=next(s for s in steps if s.get("period")=="1st" and s["kind"]=="shots")
     assert "Away: -" in shot["body"]
     assert "Leader: Not available" in shot["body"]
+
+
+def test_pp_goal_with_two_active_minors_releases_earliest_penalty():
+    goals=[{"period":"2nd","elapsed":"5:28","remaining":"11:32","team":"Home","scorer":"#55 Ashley Wagenbach","strength":"power play","assists":[]}]
+    penalties=[
+        {"period":"2nd","elapsed":"4:30","remaining":"12:30","team":"Away","player":"#8 First Penalty","penalty":"Tripping - Minor (2:00)"},
+        {"period":"2nd","elapsed":"5:00","remaining":"12:00","team":"Away","player":"#12 Second Penalty","penalty":"Hooking - Minor (2:00)"},
+    ]
+    steps=build_entry_steps(sample_game(),sample_shots(),goals,penalties,[])
+    goal=next(s for s in steps if s["kind"]=="goal")
+    penalty_steps=[s for s in steps if s["kind"]=="penalty"]
+    first=next(s for s in penalty_steps if "#8 First Penalty" in s["body"])
+    second=next(s for s in penalty_steps if "#12 Second Penalty" in s["body"])
+
+    assert "You need to set the On time to 11:32 for this specific penalty" in goal["body"]
+    assert "#8 First Penalty" in goal["body"]
+    assert "REVIEW RELEASE TIME" not in goal["body"]
+    assert "Set Back On Ice to 11:32" in first["body"]
+    assert "Set Back On Ice" not in second["body"]
+
+
+def test_simultaneous_earliest_minors_still_require_review():
+    goals=[{"period":"2nd","elapsed":"5:28","remaining":"11:32","team":"Home","scorer":"#55 Ashley Wagenbach","strength":"power play","assists":[]}]
+    penalties=[
+        {"period":"2nd","elapsed":"4:30","remaining":"12:30","team":"Away","player":"#8 A","penalty":"Tripping - Minor (2:00)"},
+        {"period":"2nd","elapsed":"4:30","remaining":"12:30","team":"Away","player":"#12 B","penalty":"Hooking - Minor (2:00)"},
+    ]
+    steps=build_entry_steps(sample_game(),sample_shots(),goals,penalties,[])
+    goal=next(s for s in steps if s["kind"]=="goal")
+    assert "REVIEW RELEASE TIME" in goal["body"]

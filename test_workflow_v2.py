@@ -75,3 +75,27 @@ def test_simultaneous_earliest_minors_still_require_review():
     steps=build_entry_steps(sample_game(),sample_shots(),goals,penalties,[])
     goal=next(s for s in steps if s["kind"]=="goal")
     assert "REVIEW RELEASE TIME" in goal["body"]
+
+
+def test_standard_minor_shows_full_two_minute_on_time():
+    penalties=[{"period":"1st","elapsed":"9:00","remaining":"8:00","team":"Home","player":"#2 B","penalty":"Holding - Minor (2:00)"}]
+    steps=build_entry_steps(sample_game(),sample_shots(),[],penalties,[])
+    penalty=next(s for s in steps if s["kind"]=="penalty")
+    assert "Off Ice: 8:00 remaining" in penalty["body"]
+    assert "Back On Ice: 6:00 remaining" in penalty["body"]
+
+
+def test_pp_goal_overrides_scheduled_minor_on_time():
+    goals=[{"period":"1st","elapsed":"10:00","remaining":"7:00","team":"Away","scorer":"#1 A","strength":"power play","assists":[]}]
+    penalties=[{"period":"1st","elapsed":"9:32","remaining":"7:28","team":"Home","player":"#2 B","penalty":"Tripping - Minor (2:00)"}]
+    steps=build_entry_steps(sample_game(),sample_shots(),goals,penalties,[])
+    penalty=next(s for s in steps if s["kind"]=="penalty")
+    assert "Back On Ice: 7:00 remaining" in penalty["body"]
+    assert "Back On Ice: 5:28" not in penalty["body"]
+
+
+def test_minor_carrying_into_next_period_shows_exact_on_time():
+    penalties=[{"period":"1st","elapsed":"16:11","remaining":"0:49","team":"Home","player":"#2 B","penalty":"Holding - Minor (2:00)"}]
+    steps=build_entry_steps(sample_game(),sample_shots(),[],penalties,[])
+    penalty=next(s for s in steps if s["kind"]=="penalty")
+    assert "Back On Ice: Next period — 15:49 remaining" in penalty["body"]

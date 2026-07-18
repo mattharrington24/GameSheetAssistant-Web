@@ -14,6 +14,36 @@ def _seconds(value: str) -> int:
         return 10**9
 
 
+
+
+def _format_clock(total_seconds: int) -> str:
+    total_seconds = max(0, int(total_seconds))
+    return f"{total_seconds // 60}:{total_seconds % 60:02d}"
+
+
+def _scheduled_minor_on_time(remaining: str, period: str, periods: list[str]) -> str:
+    """Return the full two-minute minor expiration shown on GameSheet cards.
+
+    GameSheet needs a Back On Ice time for ordinary minors in order to infer
+    manpower and correctly label shorthanded goals. Regulation periods are 17
+    minutes and overtime periods are 8 minutes in this workflow.
+    """
+    remaining_seconds = _seconds(remaining)
+    if remaining_seconds == 10**9:
+        return "Confirm in GameSheet"
+
+    if remaining_seconds >= 120:
+        return _format_clock(remaining_seconds - 120)
+
+    carry = 120 - remaining_seconds
+    current_index = next((i for i, value in enumerate(periods) if _same_period(value, period)), None)
+    next_period = periods[current_index + 1] if current_index is not None and current_index + 1 < len(periods) else None
+    if next_period and str(next_period).upper().strip().startswith("OT"):
+        next_length = 8 * 60
+    else:
+        next_length = 17 * 60
+    return f"Next period — {_format_clock(next_length - carry)}"
+
 def _period_key(value: str) -> tuple[int, int]:
     text = str(value).upper().strip()
     if text.startswith("1"):
@@ -226,15 +256,22 @@ def build_entry_steps(game, shots, goals, penalties, goalies):
                 title = "Goal"
             else:
                 warning = ""
+                on_time = ""
                 if event.get("release_at"):
+                    on_time = event["release_at"]
                     warning = (
                         "\n\n⚠ ENDS EARLY — POWER-PLAY GOAL\n"
-                        f"Set Back On Ice to {event['release_at']} remaining."
+                        f"Set Back On Ice to {event['release_at']} remaining. Use the early time shown above."
                     )
                 elif event.get("release_review"):
                     warning = "\n\n⚠ REVIEW RELEASE TIME\nThis minor overlaps a power-play goal and may end early."
+                elif _is_standard_minor(event):
+                    on_time = _scheduled_minor_on_time(event.get("remaining", ""), period, periods)
+
+                on_line = f"\nBack On Ice: {on_time} remaining" if on_time else ""
                 body = (
-                    f"Off Ice: {event['remaining']} remaining\n"
+                    f"Off Ice: {event['remaining']} remaining"
+                    f"{on_line}\n"
                     f"Player: {event['player']}\n"
                     f"Penalty: {event['penalty']}"
                     f"{warning}"

@@ -31,7 +31,7 @@ def test_pp_goal_marks_minor_for_early_release():
     steps=build_entry_steps(sample_game(),sample_shots(),goals,penalties,[])
     penalty=next(s for s in steps if s["kind"]=="penalty")
     goal=next(s for s in steps if s["kind"]=="goal")
-    assert "Set Back On Ice to 7:00" in penalty["body"]
+    assert "On Ice Time: 7:00 remaining" in penalty["body"]
     assert "You need to set the On time to 7:00 for this specific penalty" in goal["body"]
     assert "#2 B — Tripping - Minor (2:00)" in goal["body"]
     assert "Off: 7:28" in goal["body"]
@@ -62,8 +62,8 @@ def test_pp_goal_with_two_active_minors_releases_earliest_penalty():
     assert "You need to set the On time to 11:32 for this specific penalty" in goal["body"]
     assert "#8 First Penalty" in goal["body"]
     assert "REVIEW RELEASE TIME" not in goal["body"]
-    assert "Set Back On Ice to 11:32" in first["body"]
-    assert "Set Back On Ice" not in second["body"]
+    assert "On Ice Time: 11:32 remaining" in first["body"]
+    assert "On Ice Time: 10:00 remaining" in second["body"]
 
 
 def test_simultaneous_earliest_minors_still_require_review():
@@ -81,8 +81,14 @@ def test_standard_minor_shows_full_two_minute_on_time():
     penalties=[{"period":"1st","elapsed":"9:00","remaining":"8:00","team":"Home","player":"#2 B","penalty":"Holding - Minor (2:00)"}]
     steps=build_entry_steps(sample_game(),sample_shots(),[],penalties,[])
     penalty=next(s for s in steps if s["kind"]=="penalty")
-    assert "Off Ice: 8:00 remaining" in penalty["body"]
-    assert "Back On Ice: 6:00 remaining" in penalty["body"]
+    lines=penalty["body"].splitlines()
+    assert lines[:5]==[
+        "Off Ice Time: 8:00 remaining",
+        "Duration: 2 minutes",
+        "Penalty Type: Holding",
+        "Player: #2 B",
+        "On Ice Time: 6:00 remaining",
+    ]
 
 
 def test_pp_goal_overrides_scheduled_minor_on_time():
@@ -90,15 +96,15 @@ def test_pp_goal_overrides_scheduled_minor_on_time():
     penalties=[{"period":"1st","elapsed":"9:32","remaining":"7:28","team":"Home","player":"#2 B","penalty":"Tripping - Minor (2:00)"}]
     steps=build_entry_steps(sample_game(),sample_shots(),goals,penalties,[])
     penalty=next(s for s in steps if s["kind"]=="penalty")
-    assert "Back On Ice: 7:00 remaining" in penalty["body"]
-    assert "Back On Ice: 5:28" not in penalty["body"]
+    assert "On Ice Time: 7:00 remaining" in penalty["body"]
+    assert "On Ice Time: 5:28" not in penalty["body"]
 
 
 def test_minor_carrying_into_next_period_shows_exact_on_time():
     penalties=[{"period":"1st","elapsed":"16:11","remaining":"0:49","team":"Home","player":"#2 B","penalty":"Holding - Minor (2:00)"}]
     steps=build_entry_steps(sample_game(),sample_shots(),[],penalties,[])
     penalty=next(s for s in steps if s["kind"]=="penalty")
-    assert "Back On Ice: Next period — 15:49 remaining" in penalty["body"]
+    assert "On Ice Time: Next period — 15:49 remaining" in penalty["body"]
 
 
 def test_period_transition_is_an_unmissable_separate_step():
@@ -148,3 +154,38 @@ def test_penalty_shot_goal_uses_same_off_and_on_time():
     assert goal["warning"]
     assert goal["title"].endswith("Penalty-Shot Goal")
     assert "Home's goalie Off at 10:43 remaining AND Back On at 10:43 remaining" in goal["body"]
+
+
+def test_multiple_goalies_are_inferred_from_full_period_totals():
+    game={"away_team":"Hutchinson","away_score":"1","home_team":"Holy Family","home_score":"0","date":"Today","venue":"Arena"}
+    shots={
+        "periods":["1st","2nd","3rd"],
+        "away_team":"Hutchinson","away":["4","5","10","19"],
+        "home_team":"Holy Family","home":["6","8","7","21"],
+    }
+    goals=[{"period":"2nd","elapsed":"5:00","remaining":"12:00","team":"Hutchinson","scorer":"#1 A","strength":"even strength","assists":[]}]
+    goalies=[
+        {"team":"Holy Family","number":"30","name":"Sedona Blair","minutes":"34:00","shots_against":"9","goals_against":"1","saves":"8"},
+        {"team":"Holy Family","number":"31","name":"Quinn McDonald","minutes":"17:00","shots_against":"10","goals_against":"0","saves":"10"},
+        {"team":"Hutchinson","number":"35","name":"Hutch Goalie","minutes":"51:00","shots_against":"21","goals_against":"0","saves":"21"},
+    ]
+    steps=build_entry_steps(game,shots,goals,[],goalies)
+    holy_starter=next(s for s in steps if s["kind"]=="goalie-start" and s["team"]=="Holy Family")
+    assert "INFERRED STARTER" in holy_starter["body"]
+    assert "#30 Sedona Blair" in holy_starter["body"]
+    assert "#31 Quinn McDonald starts 3rd Period" in holy_starter["body"]
+    change=next(s for s in steps if s["kind"]=="goalie-change")
+    assert change["period"]=="3rd"
+    assert "CHANGE GOALIE BEFORE STARTING 3RD PERIOD" in change["body"]
+    assert "#31 Quinn McDonald" in change["body"]
+
+
+def test_ambiguous_multiple_goalies_still_require_confirmation():
+    goalies=[
+        {"team":"Away","number":"30","name":"A One","minutes":"25:30","shots_against":"12","goals_against":"1","saves":"11"},
+        {"team":"Away","number":"31","name":"A Two","minutes":"25:30","shots_against":"12","goals_against":"0","saves":"12"},
+    ]
+    steps=build_entry_steps(sample_game(),sample_shots(),[],[],goalies)
+    starter=next(s for s in steps if s["kind"]=="goalie-start" and s["team"]=="Away")
+    assert "Multiple goalies played. Select and confirm the starter" in starter["body"]
+    assert not any(s["kind"]=="goalie-change" for s in steps)

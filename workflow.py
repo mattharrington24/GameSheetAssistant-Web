@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 from copy import deepcopy
+from itertools import permutations
 
 
 def _seconds(value: str) -> int:
@@ -88,6 +89,30 @@ def _same_period(left: str, right: str) -> bool:
 def _is_standard_minor(penalty: dict) -> bool:
     text = penalty.get("penalty", "").lower()
     return "minor" in text and not any(term in text for term in ("major", "misconduct", "double minor"))
+
+
+def _penalty_card_details(penalty: dict) -> tuple[str, str]:
+    """Return a clean penalty type and human-readable duration."""
+    text = str(penalty.get("penalty", "")).strip()
+    penalty_type = text.split(" - ", 1)[0].strip() or "Confirm in GameSheet"
+    duration_match = re.search(r"\((\d+):(\d{1,2})\)", text)
+    if duration_match:
+        seconds = int(duration_match.group(1)) * 60 + int(duration_match.group(2))
+    elif _is_standard_minor(penalty):
+        seconds = 120
+    else:
+        seconds = 0
+    # SportsEngine sometimes reports an ordinary minor as 0:0.
+    if seconds == 0 and _is_standard_minor(penalty):
+        seconds = 120
+    if seconds and seconds % 60 == 0:
+        minutes = seconds // 60
+        duration = f"{minutes} minute{'s' if minutes != 1 else ''}"
+    elif seconds:
+        duration = _format_clock(seconds)
+    else:
+        duration = "Confirm in GameSheet"
+    return penalty_type, duration
 
 
 def _mark_early_releases(goals: list[dict], penalties: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -177,12 +202,75 @@ def _shot_step(shots: dict, period: str, index: int) -> dict:
     }
 
 
-def _goalie_steps(game: dict, goalies: list[dict]) -> list[dict]:
+def _period_length(period: str) -> int:
+    return 8 * 60 if str(period).upper().strip().startswith("OT") else 17 * 60
+
+
+def _infer_goalie_plans(game: dict, shots: dict, goals: list[dict], goalies: list[dict], periods: list[str]) -> dict[str, dict]:
+    """Infer full-period goalie stints only when one ordering exactly fits all totals."""
+    plans = {}
+    for team in (game["away_team"], game["home_team"]):
+        played = [g for g in goalies if g.get("team") == team and _seconds(g.get("minutes", "")) not in (0, 10**9)]
+        if len(played) < 2 or len(played) > len(periods):
+            continue
+        opponent = game["home_team"] if team == game["away_team"] else game["away_team"]
+        opponent_shots = shots.get("home" if team == game["away_team"] else "away", [])[:len(periods)]
+        if len(opponent_shots) < len(periods) or not all(str(value).isdigit() for value in opponent_shots):
+            continue
+        period_lengths = [_period_length(period) for period in periods]
+        valid = []
+        for ordering in permutations(played):
+            period_cursor = 0
+            stints = []
+            fits = True
+            for goalie in ordering:
+                duration = _seconds(goalie.get("minutes", ""))
+                start_period = period_cursor
+                covered = 0
+                while period_cursor < len(periods) and covered < duration:
+                    covered += period_lengths[period_cursor]
+                    period_cursor += 1
+                if covered != duration:
+                    fits = False
+                    break
+                expected_sa = sum(int(value) for value in opponent_shots[start_period:period_cursor])
+                expected_ga = sum(
+                    1 for goal in goals
+                    if goal.get("team") == opponent
+                    and any(_same_period(goal.get("period", ""), p) for p in periods[start_period:period_cursor])
+                )
+                if expected_sa != int(goalie.get("shots_against", -1)) or expected_ga != int(goalie.get("goals_against", -1)):
+                    fits = False
+                    break
+                stints.append({"goalie": goalie, "start": start_period, "end": period_cursor})
+            if fits and period_cursor == len(periods):
+                valid.append(stints)
+        if len(valid) == 1:
+            plans[team] = {"stints": valid[0], "inferred": True}
+    return plans
+
+
+def _goalie_steps(game: dict, goalies: list[dict], goalie_plans: dict[str, dict]) -> list[dict]:
     steps = []
     for team in (game["away_team"], game["home_team"]):
         team_goalies = [g for g in goalies if g.get("team") == team]
         played = [g for g in team_goalies if g.get("minutes") != "0:00"]
-        if len(played) == 1:
+        plan = goalie_plans.get(team)
+        if plan:
+            stints = plan["stints"]
+            starter = stints[0]["goalie"]
+            changes = "\n".join(
+                f"Goalie change: #{stint['goalie']['number']} {stint['goalie']['name']} starts {_period_label(stint_period)}."
+                for stint in stints[1:]
+                for stint_period in [goalie_plans[team]["periods"][stint["start"]]]
+            )
+            body = (
+                "INFERRED STARTER — VERIFIED BY MINUTES, SHOTS, AND GOALS\n\n"
+                f"#{starter['number']} {starter['name']}\n"
+                f"Played {starter['minutes']} · {starter['shots_against']} SA · {starter['goals_against']} GA\n\n"
+                f"{changes}"
+            )
+        elif len(played) == 1:
             goalie = played[0]
             body = (
                 "Select this starting goalie before entering events.\n\n"
@@ -211,8 +299,43 @@ def _goalie_steps(game: dict, goalies: list[dict]) -> list[dict]:
     return steps
 
 
+def _goalie_change_steps(goalie_plans: dict[str, dict], period: str) -> list[dict]:
+    steps = []
+    for team, plan in goalie_plans.items():
+        for stint in plan["stints"][1:]:
+            start_period = plan["periods"][stint["start"]]
+            if not _same_period(start_period, period):
+                continue
+            goalie = stint["goalie"]
+            steps.append({
+                "title": f"GOALIE CHANGE — {_period_label(period).upper()}",
+                "kind": "goalie-change",
+                "period": period,
+                "team": team,
+                "body": (
+                    f"⚠ CHANGE GOALIE BEFORE STARTING {_period_label(period).upper()}\n\n"
+                    f"Select #{goalie['number']} {goalie['name']} for {team}.\n"
+                    f"Inferred from {goalie['minutes']} played, {goalie['shots_against']} shots against, "
+                    f"and {goalie['goals_against']} goals against."
+                ),
+                "warning": True,
+            })
+    return steps
+
+
 def build_entry_steps(game, shots, goals, penalties, goalies):
     goals, penalties = _mark_early_releases(goals, penalties)
+    periods = list(shots.get("periods", []))
+    for event in [*goals, *penalties]:
+        period = event.get("period")
+        if period and not any(_same_period(period, existing) for existing in periods):
+            periods.append(period)
+    periods.sort(key=_period_key)
+
+    goalie_plans = _infer_goalie_plans(game, shots, goals, goalies, periods)
+    for plan in goalie_plans.values():
+        plan["periods"] = periods
+
     steps = [{
         "title": "Game Information",
         "kind": "game-info",
@@ -224,18 +347,12 @@ def build_entry_steps(game, shots, goals, penalties, goalies):
             f"Venue: {game['venue']}"
         ),
     }]
-    steps.extend(_goalie_steps(game, goalies))
-
-    periods = list(shots.get("periods", []))
-    for event in [*goals, *penalties]:
-        period = event.get("period")
-        if period and not any(_same_period(period, existing) for existing in periods):
-            periods.append(period)
-    periods.sort(key=_period_key)
+    steps.extend(_goalie_steps(game, goalies, goalie_plans))
 
     running_score = {game["away_team"]: 0, game["home_team"]: 0}
 
     for period_index, period in enumerate(periods):
+        steps.extend(_goalie_change_steps(goalie_plans, period))
         events = []
         events.extend(("goal", goal) for goal in goals if _same_period(goal.get("period", ""), period))
         events.extend(("penalty", penalty) for penalty in penalties if _same_period(penalty.get("period", ""), period))
@@ -311,12 +428,14 @@ def build_entry_steps(game, shots, goals, penalties, goalies):
                 elif _is_standard_minor(event):
                     on_time = _scheduled_minor_on_time(event.get("remaining", ""), period, periods)
 
-                on_line = f"\nBack On Ice: {on_time} remaining" if on_time else ""
+                penalty_type, duration = _penalty_card_details(event)
+                on_line = f"{on_time} remaining" if on_time else "Not applicable / confirm in GameSheet"
                 body = (
-                    f"Off Ice: {event['remaining']} remaining"
-                    f"{on_line}\n"
+                    f"Off Ice Time: {event['remaining']} remaining\n"
+                    f"Duration: {duration}\n"
+                    f"Penalty Type: {penalty_type}\n"
                     f"Player: {event['player']}\n"
-                    f"Penalty: {event['penalty']}"
+                    f"On Ice Time: {on_line}"
                     f"{warning}"
                 )
                 title = "Penalty"

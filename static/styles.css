@@ -137,6 +137,8 @@ button.danger-ghost { color:var(--bad); border-color:rgba(180,35,24,.25); }
 .workflow-card.kind-period-transition .workflow-body { color:#432d00; font-size:1.35rem; font-weight:950; text-align:center; display:grid; place-content:center; }
 [data-theme="dark"] .workflow-card.kind-period-transition { background:#5b4300; border-color:#ffc928; }
 [data-theme="dark"] .workflow-card.kind-period-transition .workflow-body { color:#fff4bd; }
-.workflow-card.kind-goalie-start::before,.workflow-card.kind-goalie-review::before { background:linear-gradient(180deg,#bd7d16,#e2a53c); }
+.workflow-card.kind-goalie-start::before,.workflow-card.kind-goalie-change::before,.workflow-card.kind-goalie-review::before { background:linear-gradient(180deg,#bd7d16,#e2a53c); }
+.workflow-card.kind-goalie-change { border-color:rgba(189,125,22,.58); }
+.workflow-card.kind-goalie-change .workflow-body { background:linear-gradient(135deg,rgba(226,165,60,.12),transparent 58%); }
 .workflow-card.workflow-warning { border-color:rgba(196,71,54,.48); }
 .workflow-card.workflow-warning .workflow-body { background:linear-gradient(135deg,rgba(196,71,54,.06),transparent 55%); }

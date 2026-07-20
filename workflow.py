@@ -21,6 +21,15 @@ def _format_clock(total_seconds: int) -> str:
     return f"{total_seconds // 60}:{total_seconds % 60:02d}"
 
 
+def _goalie_pull_time(goal_remaining: str) -> str:
+    """Return the whole-minute mark immediately before an empty-net goal."""
+    remaining_seconds = _seconds(goal_remaining)
+    if remaining_seconds == 10**9:
+        return "Confirm in GameSheet"
+    pull_seconds = ((remaining_seconds // 60) + 1) * 60
+    return _format_clock(pull_seconds)
+
+
 def _scheduled_minor_on_time(remaining: str, period: str, periods: list[str]) -> str:
     """Return the full two-minute minor expiration shown on GameSheet cards.
 
@@ -224,7 +233,9 @@ def build_entry_steps(game, shots, goals, penalties, goalies):
             periods.append(period)
     periods.sort(key=_period_key)
 
-    for period in periods:
+    running_score = {game["away_team"]: 0, game["home_team"]: 0}
+
+    for period_index, period in enumerate(periods):
         events = []
         events.extend(("goal", goal) for goal in goals if _same_period(goal.get("period", ""), period))
         events.extend(("penalty", penalty) for penalty in penalties if _same_period(penalty.get("period", ""), period))
@@ -234,6 +245,34 @@ def build_entry_steps(game, shots, goals, penalties, goalies):
         for event_number, (kind, event) in enumerate(events, start=1):
             if kind == "goal":
                 warning = ""
+                warning_card = False
+                scoring_team = event.get("team", "")
+                if scoring_team in running_score:
+                    running_score[scoring_team] += 1
+
+                special_instructions = []
+                strength_text = event.get("strength", "").lower()
+                if "empty net" in strength_text:
+                    opponent = game["home_team"] if scoring_team == game["away_team"] else game["away_team"]
+                    pull_time = _goalie_pull_time(event.get("remaining", ""))
+                    special_instructions.append(
+                        "⚠ EMPTY-NET GOAL — GOALIE CHANGE REQUIRED\n"
+                        f"Set {opponent}'s goalie to EMPTY NET at {pull_time} remaining.\n"
+                        f"After entering the goal, put {opponent}'s goalie BACK IN NET at "
+                        f"{event.get('remaining', 'the goal time')} remaining."
+                    )
+                    warning_card = True
+
+                if "penalty shot" in strength_text:
+                    opponent = game["home_team"] if scoring_team == game["away_team"] else game["away_team"]
+                    event_time = event.get("remaining", "Confirm in GameSheet")
+                    special_instructions.append(
+                        "⚠ PENALTY SHOT — GOALIE TIMING REQUIRED\n"
+                        f"Set {opponent}'s goalie Off at {event_time} remaining AND "
+                        f"Back On at {event_time} remaining."
+                    )
+                    warning_card = True
+
                 if event.get("release_player"):
                     warning = (
                         "\n\n⚠ POWER-PLAY GOAL REMINDER\n"
@@ -246,14 +285,18 @@ def build_entry_steps(game, shots, goals, penalties, goalies):
                     )
                 elif event.get("release_review"):
                     warning = "\n\n⚠ REVIEW RELEASE TIME\nMultiple opponent minors may be active. Confirm which player returns."
+                special_text = "\n\n" + "\n\n".join(special_instructions) if special_instructions else ""
                 body = (
                     f"Time Remaining: {event['remaining']}\n"
                     f"Scorer: {event['scorer']}\n"
                     f"Assists: {', '.join(event.get('assists', [])) or 'None'}\n"
-                    f"Strength: {event.get('strength', 'unknown')}"
+                    f"Strength: {event.get('strength', 'unknown')}\n\n"
+                    f"SCORE NOW: {game['away_team']} {running_score[game['away_team']]}, "
+                    f"{game['home_team']} {running_score[game['home_team']]}"
                     f"{warning}"
+                    f"{special_text}"
                 )
-                title = "Goal"
+                title = "Empty-Net Goal" if "empty net" in strength_text else "Penalty-Shot Goal" if "penalty shot" in strength_text else "Goal"
             else:
                 warning = ""
                 on_time = ""
@@ -285,12 +328,25 @@ def build_entry_steps(game, shots, goals, penalties, goalies):
                 "team": event.get("team", ""),
                 "event_number": event_number,
                 "body": body,
-                "warning": bool(event.get("release_at") or event.get("release_player") or event.get("release_review")),
+                "warning": bool(event.get("release_at") or event.get("release_player") or event.get("release_review") or (kind == "goal" and warning_card)),
             })
 
         shot_index = next((i for i, p in enumerate(shots.get("periods", [])) if _same_period(p, period)), None)
         if shot_index is not None:
             steps.append(_shot_step(shots, period, shot_index))
+
+        if period_index + 1 < len(periods):
+            next_period = periods[period_index + 1]
+            steps.append({
+                "title": f"MOVE TO {_period_label(next_period).upper()} NOW",
+                "kind": "period-transition",
+                "team": "",
+                "body": (
+                    f"⚠ STOP — MOVE GAMESHEET TO {_period_label(next_period).upper()} NOW ⚠\n\n"
+                    "Do not enter the next event until the period has been changed in GameSheet."
+                ),
+                "warning": True,
+            })
 
     played_goalies = [g for g in goalies if g.get("minutes") != "0:00"]
     goalie_lines = []

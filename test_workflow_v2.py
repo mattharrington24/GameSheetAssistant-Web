@@ -99,3 +99,52 @@ def test_minor_carrying_into_next_period_shows_exact_on_time():
     steps=build_entry_steps(sample_game(),sample_shots(),[],penalties,[])
     penalty=next(s for s in steps if s["kind"]=="penalty")
     assert "Back On Ice: Next period — 15:49 remaining" in penalty["body"]
+
+
+def test_period_transition_is_an_unmissable_separate_step():
+    steps=build_entry_steps(sample_game(),sample_shots(),[],[],[])
+    first_shots=next(i for i,s in enumerate(steps) if s.get("period")=="1st" and s["kind"]=="shots")
+    transition=steps[first_shots+1]
+    assert transition["kind"]=="period-transition"
+    assert transition["warning"]
+    assert "MOVE GAMESHEET TO 2ND PERIOD NOW" in transition["body"]
+
+
+def test_each_goal_shows_running_score_in_chronological_order():
+    game=sample_game()
+    game.update({"away_team":"Minnetonka","away_score":"3","home_team":"Edina","home_score":"2"})
+    goals=[
+        {"period":"1st","elapsed":"2:00","remaining":"15:00","team":"Minnetonka","scorer":"#1 A","strength":"even strength","assists":[]},
+        {"period":"1st","elapsed":"4:00","remaining":"13:00","team":"Edina","scorer":"#2 B","strength":"even strength","assists":[]},
+        {"period":"2nd","elapsed":"1:00","remaining":"16:00","team":"Minnetonka","scorer":"#3 C","strength":"even strength","assists":[]},
+    ]
+    steps=build_entry_steps(game,sample_shots(),goals,[],[])
+    goal_steps=[s for s in steps if s["kind"]=="goal"]
+    assert "SCORE NOW: Minnetonka 1, Edina 0" in goal_steps[0]["body"]
+    assert "SCORE NOW: Minnetonka 1, Edina 1" in goal_steps[1]["body"]
+    assert "SCORE NOW: Minnetonka 2, Edina 1" in goal_steps[2]["body"]
+
+
+def test_empty_net_goal_shows_rounded_pull_time_and_exact_return_time():
+    goals=[{"period":"3rd","elapsed":"16:39","remaining":"0:21","team":"Away","scorer":"#1 A","strength":"even strength / empty net","assists":[]}]
+    steps=build_entry_steps(sample_game(),sample_shots(),goals,[],[])
+    goal=next(s for s in steps if s["kind"]=="goal")
+    assert goal["warning"]
+    assert goal["title"].endswith("Empty-Net Goal")
+    assert "Home's goalie to EMPTY NET at 1:00 remaining" in goal["body"]
+    assert "BACK IN NET at 0:21 remaining" in goal["body"]
+
+
+def test_empty_net_goal_at_145_uses_200_pull_time():
+    goals=[{"period":"3rd","elapsed":"15:15","remaining":"1:45","team":"Home","scorer":"#2 B","strength":"empty net","assists":[]}]
+    goal=next(s for s in build_entry_steps(sample_game(),sample_shots(),goals,[],[]) if s["kind"]=="goal")
+    assert "Away's goalie to EMPTY NET at 2:00 remaining" in goal["body"]
+    assert "BACK IN NET at 1:45 remaining" in goal["body"]
+
+
+def test_penalty_shot_goal_uses_same_off_and_on_time():
+    goals=[{"period":"2nd","elapsed":"6:17","remaining":"10:43","team":"Away","scorer":"#1 A","strength":"penalty shot","assists":[]}]
+    goal=next(s for s in build_entry_steps(sample_game(),sample_shots(),goals,[],[]) if s["kind"]=="goal")
+    assert goal["warning"]
+    assert goal["title"].endswith("Penalty-Shot Goal")
+    assert "Home's goalie Off at 10:43 remaining AND Back On at 10:43 remaining" in goal["body"]

@@ -146,6 +146,8 @@ class SportsEngineParser:
                     strength = strength_match.group(1).lower() if strength_match else "unknown"
                     if "empty net" in details_text.lower():
                         strength = f"{strength} / empty net" if strength != "unknown" else "empty net"
+                    if "penalty shot" in details_text.lower():
+                        strength = f"{strength} / penalty shot" if strength != "unknown" else "penalty shot"
 
                     assists: list[str] = []
                     for detail_index, item in enumerate(details):

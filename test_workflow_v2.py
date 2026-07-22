@@ -233,3 +233,23 @@ def test_hannah_fritz_uses_validated_list_order_when_zero_shot_periods_tie():
     change=next(s for s in steps if s["kind"]=="goalie-change")
     assert change["period"]=="3rd"
     assert "#39 Erin Hannon" in change["body"]
+
+
+def test_hannah_fritz_inference_resolves_missing_third_period_from_total():
+    game={"away_team":"Cretin-Derham Hall","away_score":"10","home_team":"Irondale/St. Anthony","home_score":"0","date":"Today","venue":"Arena"}
+    shots={
+        "periods":["1st","2nd","3rd"],
+        "away_team":"Cretin-Derham Hall","away":["21","23","3","47"],
+        "home_team":"Irondale/St. Anthony","home":["3","3","-","6"],
+    }
+    goalies=[
+        {"team":"Cretin-Derham Hall","number":"1","name":"Hannah Fritz","minutes":"34:00","shots_against":"6","goals_against":"0","saves":"6"},
+        {"team":"Cretin-Derham Hall","number":"39","name":"Erin Hannon","minutes":"17:00","shots_against":"0","goals_against":"0","saves":"0"},
+    ]
+    steps=build_entry_steps(game,shots,[],[],goalies)
+    starter=next(s for s in steps if s["kind"]=="goalie-start" and s["team"]=="Cretin-Derham Hall")
+    assert starter["title"]=="Starting Goalie — Inferred"
+    assert "#1 Hannah Fritz" in starter["body"]
+    change=next(s for s in steps if s["kind"]=="goalie-change")
+    assert change["period"]=="3rd"
+    assert "#39 Erin Hannon" in change["body"]

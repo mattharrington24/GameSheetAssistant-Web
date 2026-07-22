@@ -14,6 +14,25 @@ from bs4 import BeautifulSoup
 from converter import convert_to_time_remaining
 from workflow import build_entry_steps
 
+
+def _resolve_missing_period_shots(values: list[str], period_count: int) -> list[str]:
+    """Fill one missing period when the game total determines it exactly."""
+    resolved = list(values)
+    if len(resolved) <= period_count:
+        return resolved
+    total_text = str(resolved[-1]).strip()
+    if not total_text.isdigit():
+        return resolved
+    period_values = resolved[:period_count]
+    missing = [i for i, value in enumerate(period_values) if not str(value).strip().isdigit()]
+    if len(missing) != 1:
+        return resolved
+    known_total = sum(int(value) for value in period_values if str(value).strip().isdigit())
+    inferred = int(total_text) - known_total
+    if inferred >= 0:
+        resolved[missing[0]] = str(inferred)
+    return resolved
+
 TIME_RE = re.compile(r"^\d{1,2}:\d{2}$")
 PERIOD_RE = re.compile(r"^(1st|2nd|3rd|OT\d*)$", re.IGNORECASE)
 SCORE_RE = re.compile(r"^\d+$")
@@ -86,6 +105,8 @@ class SportsEngineParser:
             raise ValueError("Incomplete SHOTS table")
 
         periods = period_headers[:-1] if period_headers and period_headers[-1] == "T" else period_headers
+        away = _resolve_missing_period_shots(away, len(periods))
+        home = _resolve_missing_period_shots(home, len(periods))
         return {
             "periods": periods,
             "away_team": away_team,

@@ -220,6 +220,20 @@ def _goalie_shots_faced(goalie: dict) -> int | None:
     return _stat_int(goalie.get("shots_against"))
 
 
+def _resolved_period_shots(values: list, period_count: int) -> list[int] | None:
+    """Return numeric period shots, inferring one blank from the final total."""
+    period_values = [_stat_int(value) for value in values[:period_count]]
+    if len(period_values) < period_count:
+        return None
+    missing = [i for i, value in enumerate(period_values) if value is None]
+    total = _stat_int(values[-1]) if len(values) > period_count else None
+    if len(missing) == 1 and total is not None:
+        inferred = total - sum(value for value in period_values if value is not None)
+        if inferred >= 0:
+            period_values[missing[0]] = inferred
+    return period_values if all(value is not None for value in period_values) else None
+
+
 def _infer_goalie_plans(game: dict, shots: dict, goals: list[dict], goalies: list[dict], periods: list[str]) -> dict[str, dict]:
     """Infer full-period goalie stints when one ordering fits minutes and shots."""
     plans = {}
@@ -228,8 +242,9 @@ def _infer_goalie_plans(game: dict, shots: dict, goals: list[dict], goalies: lis
         if len(played) < 2 or len(played) > len(periods):
             continue
         opponent = game["home_team"] if team == game["away_team"] else game["away_team"]
-        opponent_shots = shots.get("home" if team == game["away_team"] else "away", [])[:len(periods)]
-        if len(opponent_shots) < len(periods) or not all(str(value).isdigit() for value in opponent_shots):
+        opponent_values = shots.get("home" if team == game["away_team"] else "away", [])
+        opponent_shots = _resolved_period_shots(opponent_values, len(periods))
+        if opponent_shots is None:
             continue
         period_lengths = [_period_length(period) for period in periods]
         valid = []
@@ -247,7 +262,7 @@ def _infer_goalie_plans(game: dict, shots: dict, goals: list[dict], goalies: lis
                 if covered != duration:
                     fits = False
                     break
-                expected_sa = sum(int(value) for value in opponent_shots[start_period:period_cursor])
+                expected_sa = sum(opponent_shots[start_period:period_cursor])
                 shots_faced = _goalie_shots_faced(goalie)
                 if shots_faced is None or expected_sa != shots_faced:
                     fits = False

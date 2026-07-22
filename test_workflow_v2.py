@@ -189,3 +189,25 @@ def test_ambiguous_multiple_goalies_still_require_confirmation():
     starter=next(s for s in steps if s["kind"]=="goalie-start" and s["team"]=="Away")
     assert "Multiple goalies played. Select and confirm the starter" in starter["body"]
     assert not any(s["kind"]=="goalie-change" for s in steps)
+
+
+def test_hannah_fritz_starter_is_inferred_from_saves_plus_goals():
+    game={"away_team":"Irondale/St. Anthony","away_score":"0","home_team":"Opponent","home_score":"0","date":"Today","venue":"Arena"}
+    shots={
+        "periods":["1st","2nd","3rd"],
+        "away_team":"Irondale/St. Anthony","away":["2","4","7","13"],
+        "home_team":"Opponent","home":["8","6","5","19"],
+    }
+    goalies=[
+        {"team":"Opponent","number":"30","name":"Hannah Fritz","minutes":"34:00","shots_against":"0","goals_against":"0","saves":"6"},
+        {"team":"Opponent","number":"31","name":"Second Goalie","minutes":"17:00","shots_against":"0","goals_against":"0","saves":"7"},
+    ]
+    steps=build_entry_steps(game,shots,[],[],goalies)
+    starter=next(s for s in steps if s["kind"]=="goalie-start" and s["team"]=="Opponent")
+    assert starter["title"]=="Starting Goalie — Inferred"
+    assert "#30 Hannah Fritz" in starter["body"]
+    assert "34:00 exactly covers 1st Period and 2nd Period" in starter["body"]
+    assert "6 shots faced (saves + goals allowed) matches Irondale/St. Anthony's 6 shots" in starter["body"]
+    change=next(s for s in steps if s["kind"]=="goalie-change")
+    assert change["period"]=="3rd"
+    assert "#31 Second Goalie" in change["body"]

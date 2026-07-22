@@ -206,8 +206,22 @@ def _period_length(period: str) -> int:
     return 8 * 60 if str(period).upper().strip().startswith("OT") else 17 * 60
 
 
+def _stat_int(value) -> int | None:
+    text = str(value).strip()
+    return int(text) if text.isdigit() else None
+
+
+def _goalie_shots_faced(goalie: dict) -> int | None:
+    """Prefer the auditable saves + goals-against total over a reported SA field."""
+    saves = _stat_int(goalie.get("saves"))
+    goals_against = _stat_int(goalie.get("goals_against"))
+    if saves is not None and goals_against is not None:
+        return saves + goals_against
+    return _stat_int(goalie.get("shots_against"))
+
+
 def _infer_goalie_plans(game: dict, shots: dict, goals: list[dict], goalies: list[dict], periods: list[str]) -> dict[str, dict]:
-    """Infer full-period goalie stints only when one ordering exactly fits all totals."""
+    """Infer full-period goalie stints when one ordering fits minutes and shots."""
     plans = {}
     for team in (game["away_team"], game["home_team"]):
         played = [g for g in goalies if g.get("team") == team and _seconds(g.get("minutes", "")) not in (0, 10**9)]
@@ -234,19 +248,21 @@ def _infer_goalie_plans(game: dict, shots: dict, goals: list[dict], goalies: lis
                     fits = False
                     break
                 expected_sa = sum(int(value) for value in opponent_shots[start_period:period_cursor])
-                expected_ga = sum(
-                    1 for goal in goals
-                    if goal.get("team") == opponent
-                    and any(_same_period(goal.get("period", ""), p) for p in periods[start_period:period_cursor])
-                )
-                if expected_sa != int(goalie.get("shots_against", -1)) or expected_ga != int(goalie.get("goals_against", -1)):
+                shots_faced = _goalie_shots_faced(goalie)
+                if shots_faced is None or expected_sa != shots_faced:
                     fits = False
                     break
-                stints.append({"goalie": goalie, "start": start_period, "end": period_cursor})
+                stints.append({
+                    "goalie": goalie,
+                    "start": start_period,
+                    "end": period_cursor,
+                    "shots_faced": shots_faced,
+                    "matched_shots": expected_sa,
+                })
             if fits and period_cursor == len(periods):
                 valid.append(stints)
         if len(valid) == 1:
-            plans[team] = {"stints": valid[0], "inferred": True}
+            plans[team] = {"stints": valid[0], "inferred": True, "opponent": opponent}
     return plans
 
 
@@ -258,16 +274,23 @@ def _goalie_steps(game: dict, goalies: list[dict], goalie_plans: dict[str, dict]
         plan = goalie_plans.get(team)
         if plan:
             stints = plan["stints"]
-            starter = stints[0]["goalie"]
+            starter_stint = stints[0]
+            starter = starter_stint["goalie"]
+            covered_periods = [goalie_plans[team]["periods"][i] for i in range(starter_stint["start"], starter_stint["end"])]
+            period_text = " and ".join(_period_label(period) for period in covered_periods)
             changes = "\n".join(
                 f"Goalie change: #{stint['goalie']['number']} {stint['goalie']['name']} starts {_period_label(stint_period)}."
                 for stint in stints[1:]
                 for stint_period in [goalie_plans[team]["periods"][stint["start"]]]
             )
             body = (
-                "INFERRED STARTER — VERIFIED BY MINUTES, SHOTS, AND GOALS\n\n"
+                "INFERRED STARTER — VERIFIED BY MINUTES AND SHOTS\n\n"
                 f"#{starter['number']} {starter['name']}\n"
-                f"Played {starter['minutes']} · {starter['shots_against']} SA · {starter['goals_against']} GA\n\n"
+                f"Played {starter['minutes']} · {starter_stint['shots_faced']} shots faced · "
+                f"{starter.get('goals_against', '—')} GA\n\n"
+                f"Why: {starter['minutes']} exactly covers {period_text}, and "
+                f"{starter_stint['shots_faced']} shots faced (saves + goals allowed) matches "
+                f"{plan['opponent']}'s {starter_stint['matched_shots']} shots in those periods.\n\n"
                 f"{changes}"
             )
         elif len(played) == 1:
@@ -291,7 +314,7 @@ def _goalie_steps(game: dict, goalies: list[dict], goalie_plans: dict[str, dict]
             body = "No goalie record was parsed. Confirm and select the starting goalie manually."
 
         steps.append({
-            "title": "Starting Goalie",
+            "title": "Starting Goalie — Inferred" if plan else "Starting Goalie",
             "kind": "goalie-start",
             "team": team,
             "body": body,
@@ -315,8 +338,8 @@ def _goalie_change_steps(goalie_plans: dict[str, dict], period: str) -> list[dic
                 "body": (
                     f"⚠ CHANGE GOALIE BEFORE STARTING {_period_label(period).upper()}\n\n"
                     f"Select #{goalie['number']} {goalie['name']} for {team}.\n"
-                    f"Inferred from {goalie['minutes']} played, {goalie['shots_against']} shots against, "
-                    f"and {goalie['goals_against']} goals against."
+                    f"Inferred from {goalie['minutes']} played and {stint['shots_faced']} shots faced "
+                    "(saves + goals allowed), matched to the opponent's period shots."
                 ),
                 "warning": True,
             })

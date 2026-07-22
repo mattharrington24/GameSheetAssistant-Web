@@ -261,8 +261,31 @@ def _infer_goalie_plans(game: dict, shots: dict, goals: list[dict], goalies: lis
                 })
             if fits and period_cursor == len(periods):
                 valid.append(stints)
+        selected = None
+        basis = ""
         if len(valid) == 1:
-            plans[team] = {"stints": valid[0], "inferred": True, "opponent": opponent}
+            selected = valid[0]
+            basis = "unique totals match"
+        elif valid:
+            # Zero-shot periods can make more than one ordering fit the same
+            # minutes and save totals. SportsEngine preserves the goalie-table
+            # order, so use that ordering only after it has also passed every
+            # minutes-and-shots validation above.
+            listed_order = tuple(played)
+            listed_matches = [
+                stints for stints in valid
+                if tuple(stint["goalie"] for stint in stints) == listed_order
+            ]
+            if len(listed_matches) == 1:
+                selected = listed_matches[0]
+                basis = "validated SportsEngine goalie order"
+        if selected:
+            plans[team] = {
+                "stints": selected,
+                "inferred": True,
+                "opponent": opponent,
+                "basis": basis,
+            }
     return plans
 
 
@@ -290,7 +313,8 @@ def _goalie_steps(game: dict, goalies: list[dict], goalie_plans: dict[str, dict]
                 f"{starter.get('goals_against', '—')} GA\n\n"
                 f"Why: {starter['minutes']} exactly covers {period_text}, and "
                 f"{starter_stint['shots_faced']} shots faced (saves + goals allowed) matches "
-                f"{plan['opponent']}'s {starter_stint['matched_shots']} shots in those periods.\n\n"
+                f"{plan['opponent']}'s {starter_stint['matched_shots']} shots in those periods.\n"
+                f"Inference basis: {plan['basis']}.\n\n"
                 f"{changes}"
             )
         elif len(played) == 1:

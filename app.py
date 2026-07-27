@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import hmac
+import json
 import os
 import re
+import tempfile
+import threading
+import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import wraps
+from pathlib import Path
 from urllib.parse import urlparse
 
 import requests
@@ -11,7 +17,13 @@ from flask import Flask, jsonify, redirect, render_template, request, session, u
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from web_parser import SportsEngineParser
-from roster_compare import compare_rosters, parse_roster
+from roster_compare import (
+    compare_rosters,
+    find_transfers,
+    parse_roster,
+    roster_team_name,
+    season_links,
+)
 
 app = Flask(__name__)
 app.config.update(
@@ -31,6 +43,8 @@ SPORTSENGINE_HOSTS = {
 GAME_ID_RE = re.compile(r"^\d{6,12}$")
 ROSTER_ID_RE = re.compile(r"^\d{6,12}$")
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "").strip()
+TRANSFER_JOB_DIR = Path(tempfile.gettempdir()) / "gamesheet-transfer-jobs"
+TRANSFER_JOB_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def auth_required(view):
@@ -82,6 +96,116 @@ def normalize_roster_input(value: str) -> str:
     if not re.fullmatch(r"/roster/show/\d+", parsed.path.rstrip("/")):
         raise ValueError("The URL must be a SportsEngine roster page.")
     return value
+
+
+def normalize_season_input(value: str) -> str:
+    value = value.strip()
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or parsed.hostname not in SPORTSENGINE_HOSTS:
+        raise ValueError("Enter a MN Girls Hockey Hub SportsEngine season-hub URL.")
+    if not re.match(r"^/page/show/\d+", parsed.path):
+        raise ValueError("The URL must be a SportsEngine season-hub page.")
+    if "subseason=" not in parsed.query:
+        raise ValueError("The season-hub URL must include its subseason number.")
+    return value
+
+
+def _job_path(job_id: str) -> Path:
+    return TRANSFER_JOB_DIR / f"{job_id}.json"
+
+
+def _write_job(job_id: str, data: dict) -> None:
+    target = _job_path(job_id)
+    temporary = target.with_suffix(".tmp")
+    temporary.write_text(json.dumps(data), encoding="utf-8")
+    os.replace(temporary, target)
+
+
+def _read_job(job_id: str) -> dict | None:
+    if not re.fullmatch(r"[a-f0-9]{32}", job_id):
+        return None
+    path = _job_path(job_id)
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _fetch_many(urls: list[str], workers: int = 10) -> tuple[dict[str, str], list[dict[str, str]]]:
+    pages: dict[str, str] = {}
+    failures: list[dict[str, str]] = []
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(fetch_game, url): url for url in urls}
+        for future in as_completed(futures):
+            url = futures[future]
+            try:
+                pages[url] = future.result()
+            except Exception as error:
+                failures.append({"url": url, "error": str(error)})
+    return pages, failures
+
+
+def _discover_season_rosters(hub_url: str, update) -> tuple[list[dict], list[dict]]:
+    hub_html = fetch_game(hub_url)
+    visited = {hub_url}
+    frontier = season_links(hub_html, hub_url, "page")
+    roster_urls = set(season_links(hub_html, hub_url, "roster"))
+    failures: list[dict[str, str]] = []
+
+    for depth in range(3):
+        frontier = [url for url in frontier if url not in visited][:350]
+        if not frontier:
+            break
+        update(f"Discovering team pages ({depth + 1}/3)", len(visited), len(visited) + len(frontier))
+        pages, page_failures = _fetch_many(frontier)
+        failures.extend(page_failures)
+        next_frontier: set[str] = set()
+        for url, html in pages.items():
+            visited.add(url)
+            roster_urls.update(season_links(html, url, "roster"))
+            next_frontier.update(season_links(html, url, "page"))
+        frontier = sorted(next_frontier - visited)
+
+    if not roster_urls:
+        raise ValueError("No team roster links were found from this season hub.")
+
+    update("Reading team rosters", 0, len(roster_urls))
+    roster_pages, roster_failures = _fetch_many(sorted(roster_urls), workers=8)
+    failures.extend(roster_failures)
+    rosters: list[dict] = []
+    for index, (url, html) in enumerate(roster_pages.items(), 1):
+        try:
+            roster = parse_roster(html)
+            roster["team"] = roster_team_name(roster["title"])
+            roster["source_url"] = url
+            rosters.append(roster)
+        except ValueError as error:
+            failures.append({"url": url, "error": str(error)})
+        if index % 5 == 0 or index == len(roster_pages):
+            update("Reading team rosters", index, len(roster_urls))
+    return rosters, failures
+
+
+def _run_transfer_job(job_id: str, previous_url: str, current_url: str) -> None:
+    job = {"status": "running", "stage": "Starting", "current": 0, "total": 1}
+
+    def update(stage: str, current: int, total: int) -> None:
+        job.update({"stage": stage, "current": current, "total": total})
+        _write_job(job_id, job)
+
+    try:
+        update("Scanning previous season", 0, 1)
+        previous, previous_failures = _discover_season_rosters(previous_url, update)
+        update("Scanning current season", 0, 1)
+        current, current_failures = _discover_season_rosters(current_url, update)
+        result = find_transfers(previous, current)
+        result["failures"] = previous_failures + current_failures
+        result["previous_hub_url"] = previous_url
+        result["current_hub_url"] = current_url
+        job.update({"status": "complete", "stage": "Complete", "current": 1, "total": 1, "result": result})
+    except Exception as error:
+        app.logger.exception("Transfer scan failed")
+        job.update({"status": "failed", "stage": "Failed", "error": str(error)})
+    _write_job(job_id, job)
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -154,6 +278,34 @@ def compare_roster_pages():
     except Exception as error:
         app.logger.exception("Unexpected roster comparison error")
         return jsonify({"ok": False, "error": f"Unexpected roster comparison error: {error}"}), 500
+
+
+@app.post("/api/transfers/start")
+@auth_required
+def start_transfer_scan():
+    payload = request.get_json(silent=True) or {}
+    try:
+        previous_url = normalize_season_input(str(payload.get("previous_url", "")))
+        current_url = normalize_season_input(str(payload.get("current_url", "")))
+    except ValueError as error:
+        return jsonify({"ok": False, "error": str(error)}), 400
+    job_id = uuid.uuid4().hex
+    _write_job(job_id, {"status": "queued", "stage": "Queued", "current": 0, "total": 1})
+    threading.Thread(
+        target=_run_transfer_job,
+        args=(job_id, previous_url, current_url),
+        daemon=True,
+    ).start()
+    return jsonify({"ok": True, "job_id": job_id})
+
+
+@app.get("/api/transfers/status/<job_id>")
+@auth_required
+def transfer_scan_status(job_id: str):
+    job = _read_job(job_id)
+    if job is None:
+        return jsonify({"ok": False, "error": "Transfer scan not found."}), 404
+    return jsonify({"ok": True, "job": job})
 
 
 @app.get("/health")

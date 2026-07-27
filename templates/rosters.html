@@ -25,6 +25,12 @@
   </header>
 
   <main class="roster-shell">
+    <nav class="mode-tabs card" aria-label="Roster tools">
+      <button class="mode-tab active" data-mode="teamCompare">Compare Two Rosters</button>
+      <button class="mode-tab" data-mode="transferFinder">Find Transfers</button>
+    </nav>
+
+    <div id="teamCompare" class="mode-panel active">
     <section class="card roster-form">
       <div>
         <p class="eyebrow">YEAR-TO-YEAR CHECK</p>
@@ -66,6 +72,56 @@
         </section>
       </div>
     </section>
+    </div>
+
+    <div id="transferFinder" class="mode-panel">
+      <section class="card roster-form">
+        <div>
+          <p class="eyebrow">STATEWIDE SEASON SCAN</p>
+          <h2>Find players who changed schools</h2>
+          <p class="form-help">Paste two MSHSL season-hub URLs. The first scan can take several minutes while the tool visits each team roster.</p>
+        </div>
+        <label for="previousSeason">Previous-season hub URL</label>
+        <input id="previousSeason" type="url" value="https://stats.mngirlshockeyhub.com/page/show/5878509?subseason=697635" autocomplete="off">
+        <label for="currentSeason">Following-season hub URL</label>
+        <input id="currentSeason" type="url" value="https://stats.mngirlshockeyhub.com/page/show/6547398-mshsl-2009-25-2021-2022-?subseason=763089" autocomplete="off">
+        <button id="findTransfers" class="primary">Find Transfers</button>
+        <div id="transferError" class="error hidden"></div>
+        <div id="transferProgress" class="scan-progress hidden">
+          <div class="progress-track"><div id="transferProgressBar" class="progress-fill"></div></div>
+          <strong id="transferStage">Starting…</strong>
+          <span id="transferProgressText"></span>
+        </div>
+      </section>
+
+      <section id="transferResults" class="hidden">
+        <section class="card comparison-summary">
+          <div>
+            <p class="eyebrow">TRANSFER SCAN COMPLETE</p>
+            <h2>Possible Transfers</h2>
+            <p id="avaCheck" class="validation-badge"></p>
+          </div>
+          <div class="comparison-counts transfer-counts">
+            <div><strong id="transferCount">0</strong><span>Likely</span></div>
+            <div><strong id="reviewCount">0</strong><span>Review</span></div>
+            <div><strong id="teamCount">0</strong><span>Teams scanned</span></div>
+          </div>
+        </section>
+        <section class="card result-group transfer-group">
+          <div class="result-heading"><div><p class="eyebrow">EXACT NAME MATCHES</p><h2>Likely Transfers</h2></div><button id="copyTransfers">Copy</button></div>
+          <div id="transferPlayers" class="player-list transfer-list"></div>
+        </section>
+        <section id="reviewGroup" class="card result-group hidden">
+          <div class="result-heading"><div><p class="eyebrow">DUPLICATE NAME</p><h2>Needs Review</h2></div></div>
+          <div id="reviewPlayers" class="player-list transfer-list"></div>
+        </section>
+        <section id="scanWarnings" class="card hidden">
+          <p class="eyebrow">INCOMPLETE PAGES</p>
+          <h2>Scan Warnings</h2>
+          <p id="warningText" class="form-help"></p>
+        </section>
+      </section>
+    </div>
   </main>
   <div id="toast" class="toast hidden" role="status" aria-live="polite"><span id="toastMessage"></span></div>
   <script src="{{ url_for('static', filename='rosters.js') }}"></script>

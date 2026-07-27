@@ -1,4 +1,11 @@
-from roster_compare import compare_rosters, normalize_name, parse_roster
+from roster_compare import (
+    compare_rosters,
+    find_transfers,
+    normalize_name,
+    parse_roster,
+    roster_team_name,
+    season_links,
+)
 
 
 def roster_html(title, players):
@@ -39,3 +46,36 @@ def test_empty_roster_is_rejected():
         assert "No players" in str(error)
     else:
         raise AssertionError("Expected missing roster error")
+
+
+def test_season_link_discovery_keeps_subseason():
+    html = """
+    <a href="/page/show/111-breck?subseason=697635">Breck</a>
+    <a href="/page/show/222-other?subseason=999999">Other year</a>
+    <a href="/roster/show/333">Roster</a>
+    """
+    source = "https://stats.mngirlshockeyhub.com/page/show/1?subseason=697635"
+    assert season_links(html, source, "page") == [
+        "https://stats.mngirlshockeyhub.com/page/show/111-breck?subseason=697635"
+    ]
+    assert season_links(html, source, "roster") == [
+        "https://stats.mngirlshockeyhub.com/roster/show/333?subseason=697635"
+    ]
+
+
+def test_team_name_from_sportsengine_title():
+    assert roster_team_name("Breck - 2020-21 Regular & Postseason") == "Breck"
+    assert roster_team_name("Minnetonka - MN Girls' Hockey Hub") == "Minnetonka"
+
+
+def test_transfer_finder_confirms_ava_lindsay():
+    previous = [{"team": "Breck", "source_url": "old", "players": [
+        {"name": "Ava Lindsay", "number": "9", "position": "F", "grade": "10"}
+    ]}]
+    current = [{"team": "Minnetonka", "source_url": "new", "players": [
+        {"name": "Ava Lindsay", "number": "11", "position": "F", "grade": "11"}
+    ]}]
+    result = find_transfers(previous, current)
+    assert result["ava_lindsay_found"] is True
+    assert result["transfers"][0]["previous_team"] == "Breck"
+    assert result["transfers"][0]["current_team"] == "Minnetonka"

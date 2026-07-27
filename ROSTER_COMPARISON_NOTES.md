@@ -23,3 +23,11 @@ and verifies the known Ava Lindsay transfer from Breck to Minnetonka.
 The scanner processes SportsEngine pages in a small, bounded stream and uses a
 single Gunicorn worker so statewide scans remain within Render's 512 MB free
 instance memory limit.
+
+## Player aliases
+
+Nickname and formal-name changes can be matched without creating false
+departures. Isa Goettl and Isabel Goettl are built in as the first confirmed
+alias. Other same-last-name variations appear under **Possible Matches**; using
+**Confirm Match** remembers that alias in the current browser and applies it to
+future roster comparisons and transfer scans.

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from difflib import SequenceMatcher
 from typing import Any
 from urllib.parse import parse_qs, urljoin, urlparse, urlunparse
 
@@ -18,6 +19,9 @@ SPORTSENGINE_HOSTS = {
     "www.mngirlshockeyhub.com",
     "mngirlshockeyhub.com",
 }
+DEFAULT_PLAYER_ALIASES = [
+    ("Isa Goettl", "Isabel Goettl"),
+]
 
 
 def _clean(value: str) -> str:
@@ -37,6 +41,68 @@ def normalize_name(value: str) -> str:
         last, first = value.split(",", 1)
         value = f"{first} {last}"
     return re.sub(r"[^a-z0-9]+", "", value)
+
+
+def alias_map(extra_aliases: list[dict[str, str]] | None = None) -> dict[str, str]:
+    pairs = list(DEFAULT_PLAYER_ALIASES)
+    for item in extra_aliases or []:
+        pairs.append((str(item.get("previous", "")), str(item.get("current", ""))))
+    aliases: dict[str, str] = {}
+    for previous, current in pairs:
+        previous_key = normalize_name(previous)
+        current_key = normalize_name(current)
+        if previous_key and current_key:
+            canonical = min(previous_key, current_key)
+            aliases[previous_key] = canonical
+            aliases[current_key] = canonical
+    return aliases
+
+
+def canonical_name(value: str, aliases: dict[str, str]) -> str:
+    key = normalize_name(value)
+    return aliases.get(key, key)
+
+
+def _name_parts(value: str) -> tuple[str, str]:
+    value = _clean(value)
+    if "," in value:
+        last, first = value.split(",", 1)
+        value = f"{first} {last}"
+    parts = re.findall(r"[a-z0-9]+", unicodedata.normalize("NFKD", value).casefold())
+    return (parts[0], parts[-1]) if len(parts) >= 2 else (parts[0] if parts else "", "")
+
+
+def possible_name_matches(
+    previous_players: list[dict[str, str]],
+    current_players: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    candidates: list[tuple[float, dict[str, str], dict[str, str]]] = []
+    for previous in previous_players:
+        old_first, old_last = _name_parts(previous["name"])
+        for current in current_players:
+            new_first, new_last = _name_parts(current["name"])
+            if not old_last or old_last != new_last or not old_first or not new_first:
+                continue
+            similarity = SequenceMatcher(None, old_first, new_first).ratio()
+            prefix_match = (
+                min(len(old_first), len(new_first)) >= 3
+                and (old_first.startswith(new_first) or new_first.startswith(old_first))
+            )
+            if prefix_match or similarity >= 0.72:
+                candidates.append((similarity, previous, current))
+
+    matches: list[dict[str, Any]] = []
+    used_previous: set[str] = set()
+    used_current: set[str] = set()
+    for similarity, previous, current in sorted(candidates, key=lambda item: item[0], reverse=True):
+        old_key = normalize_name(previous["name"])
+        new_key = normalize_name(current["name"])
+        if old_key in used_previous or new_key in used_current:
+            continue
+        used_previous.add(old_key)
+        used_current.add(new_key)
+        matches.append({"previous": previous, "current": current, "similarity": round(similarity, 2)})
+    return matches
 
 
 def normalize_team(value: str) -> str:
@@ -205,13 +271,19 @@ def roster_url_for_team_page(team_url: str) -> str:
     return urlunparse((parsed.scheme, parsed.netloc, f"/roster/show/{roster_id}", "", parsed.query, ""))
 
 
-def find_transfers(previous_rosters: list[dict[str, Any]], current_rosters: list[dict[str, Any]]) -> dict[str, Any]:
+def find_transfers(
+    previous_rosters: list[dict[str, Any]],
+    current_rosters: list[dict[str, Any]],
+    extra_aliases: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    aliases = alias_map(extra_aliases)
+
     def player_index(rosters: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
         index: dict[str, list[dict[str, Any]]] = {}
         for roster in rosters:
             for player in roster["players"]:
                 item = {**player, "team": roster["team"], "roster_url": roster.get("source_url", "")}
-                index.setdefault(normalize_name(player["name"]), []).append(item)
+                index.setdefault(canonical_name(player["name"], aliases), []).append(item)
         return index
 
     previous = player_index(previous_rosters)
@@ -265,9 +337,14 @@ def find_transfers(previous_rosters: list[dict[str, Any]], current_rosters: list
     }
 
 
-def compare_rosters(previous: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
-    previous_by_name = {normalize_name(player["name"]): player for player in previous["players"]}
-    current_by_name = {normalize_name(player["name"]): player for player in current["players"]}
+def compare_rosters(
+    previous: dict[str, Any],
+    current: dict[str, Any],
+    extra_aliases: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    aliases = alias_map(extra_aliases)
+    previous_by_name = {canonical_name(player["name"], aliases): player for player in previous["players"]}
+    current_by_name = {canonical_name(player["name"], aliases): player for player in current["players"]}
     returning_keys = previous_by_name.keys() & current_by_name.keys()
     new_keys = current_by_name.keys() - previous_by_name.keys()
     departed_keys = previous_by_name.keys() - current_by_name.keys()
@@ -282,17 +359,20 @@ def compare_rosters(previous: dict[str, Any], current: dict[str, Any]) -> dict[s
     returning.sort(key=lambda item: by_name(item["current"]))
     new = sorted((current_by_name[key] for key in new_keys), key=by_name)
     departed = sorted((previous_by_name[key] for key in departed_keys), key=by_name)
+    possible_matches = possible_name_matches(departed, new)
     return {
         "previous": previous,
         "current": current,
         "returning": returning,
         "new": new,
         "departed": departed,
+        "possible_matches": possible_matches,
         "counts": {
             "previous": len(previous_by_name),
             "current": len(current_by_name),
             "returning": len(returning),
             "new": len(new),
             "departed": len(departed),
+            "possible_matches": len(possible_matches),
         },
     }

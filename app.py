@@ -112,6 +112,21 @@ def normalize_season_input(value: str) -> str:
     return value
 
 
+def request_aliases(payload: dict) -> list[dict[str, str]]:
+    raw_aliases = payload.get("aliases", [])
+    if not isinstance(raw_aliases, list):
+        return []
+    aliases: list[dict[str, str]] = []
+    for item in raw_aliases[:200]:
+        if not isinstance(item, dict):
+            continue
+        previous = str(item.get("previous", "")).strip()[:100]
+        current = str(item.get("current", "")).strip()[:100]
+        if previous and current:
+            aliases.append({"previous": previous, "current": current})
+    return aliases
+
+
 def _job_path(job_id: str) -> Path:
     return TRANSFER_JOB_DIR / f"{job_id}.json"
 
@@ -192,7 +207,12 @@ def _discover_season_rosters(hub_url: str, update) -> tuple[list[dict], list[dic
     return rosters, failures
 
 
-def _run_transfer_job(job_id: str, previous_url: str, current_url: str) -> None:
+def _run_transfer_job(
+    job_id: str,
+    previous_url: str,
+    current_url: str,
+    aliases: list[dict[str, str]],
+) -> None:
     job = {"status": "running", "stage": "Starting", "current": 0, "total": 1}
 
     def update(stage: str, current: int, total: int) -> None:
@@ -204,7 +224,7 @@ def _run_transfer_job(job_id: str, previous_url: str, current_url: str) -> None:
         previous, previous_failures = _discover_season_rosters(previous_url, update)
         update("Scanning current season", 0, 1)
         current, current_failures = _discover_season_rosters(current_url, update)
-        result = find_transfers(previous, current)
+        result = find_transfers(previous, current, aliases)
         result["failures"] = previous_failures + current_failures
         result["previous_hub_url"] = previous_url
         result["current_hub_url"] = current_url
@@ -276,7 +296,7 @@ def compare_roster_pages():
         current_url = normalize_roster_input(str(payload.get("current_url", "")))
         previous = parse_roster(fetch_game(previous_url))
         current = parse_roster(fetch_game(current_url))
-        result = compare_rosters(previous, current)
+        result = compare_rosters(previous, current, request_aliases(payload))
         result["previous"]["source_url"] = previous_url
         result["current"]["source_url"] = current_url
         return jsonify({"ok": True, "data": result})
@@ -294,13 +314,14 @@ def start_transfer_scan():
     try:
         previous_url = normalize_season_input(str(payload.get("previous_url", "")))
         current_url = normalize_season_input(str(payload.get("current_url", "")))
+        aliases = request_aliases(payload)
     except ValueError as error:
         return jsonify({"ok": False, "error": str(error)}), 400
     job_id = uuid.uuid4().hex
     _write_job(job_id, {"status": "queued", "stage": "Queued", "current": 0, "total": 1})
     threading.Thread(
         target=_run_transfer_job,
-        args=(job_id, previous_url, current_url),
+        args=(job_id, previous_url, current_url, aliases),
         daemon=True,
     ).start()
     return jsonify({"ok": True, "job_id": job_id})

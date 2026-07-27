@@ -2,6 +2,28 @@ const $ = (id) => document.getElementById(id);
 const escapeHtml = (value='') => String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 let result = null;
 let transferResult = null;
+const ALIAS_KEY = 'gsa-player-aliases-v1';
+
+function playerAliases() {
+  try {
+    const aliases = JSON.parse(localStorage.getItem(ALIAS_KEY) || '[]');
+    return Array.isArray(aliases) ? aliases : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberAlias(previous, current) {
+  const aliases = playerAliases();
+  const exists = aliases.some(item =>
+    item.previous.toLowerCase() === previous.toLowerCase() &&
+    item.current.toLowerCase() === current.toLowerCase()
+  );
+  if (!exists) {
+    aliases.push({previous, current});
+    localStorage.setItem(ALIAS_KEY, JSON.stringify(aliases));
+  }
+}
 
 function showError(message) {
   $('rosterError').textContent = message;
@@ -30,6 +52,31 @@ function renderPlayers(id, players, returning=false) {
     : '<p class="empty-list">None</p>';
 }
 
+function renderPossibleMatches(matches) {
+  $('possibleMatchCount').textContent = matches.length;
+  $('possibleMatchGroup').classList.toggle('hidden', !matches.length);
+  $('possibleMatchPlayers').innerHTML = matches.map((item, index) =>
+    `<article class="player-row possible-row">
+      <strong>${escapeHtml(item.previous.name)} → ${escapeHtml(item.current.name)}</strong>
+      <span>Same last name; first names may be a nickname or spelling variation.</span>
+      <button class="success confirm-alias" data-index="${index}">Confirm Match</button>
+    </article>`
+  ).join('');
+  document.querySelectorAll('.confirm-alias').forEach(button => button.addEventListener('click', async () => {
+    const match = matches[Number(button.dataset.index)];
+    rememberAlias(match.previous.name, match.current.name);
+    showToastAlias(`${match.previous.name} and ${match.current.name} will now match`);
+    await compare();
+  }));
+}
+
+function showToastAlias(message) {
+  $('toastMessage').textContent = message;
+  $('toast').classList.remove('hidden');
+  clearTimeout(showToastAlias.timer);
+  showToastAlias.timer = setTimeout(() => $('toast').classList.add('hidden'), 1800);
+}
+
 async function compare() {
   const previousUrl = $('previousRoster').value.trim();
   const currentUrl = $('currentRoster').value.trim();
@@ -42,7 +89,7 @@ async function compare() {
     const response = await fetch('/api/rosters/compare', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({previous_url:previousUrl, current_url:currentUrl}),
+      body: JSON.stringify({previous_url:previousUrl, current_url:currentUrl, aliases:playerAliases()}),
     });
     if (response.status === 401) { window.location.href='/login'; return; }
     const payload = await response.json();
@@ -55,6 +102,7 @@ async function compare() {
     renderPlayers('returningPlayers', result.returning, true);
     renderPlayers('newPlayers', result.new);
     renderPlayers('departedPlayers', result.departed);
+    renderPossibleMatches(result.possible_matches || []);
     $('rosterResults').classList.remove('hidden');
     $('rosterResults').scrollIntoView({behavior:'smooth', block:'start'});
   } catch (error) {
@@ -177,7 +225,7 @@ async function findTransfers() {
     const response = await fetch('/api/transfers/start', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({previous_url:previousUrl, current_url:currentUrl}),
+      body: JSON.stringify({previous_url:previousUrl, current_url:currentUrl, aliases:playerAliases()}),
     });
     if (response.status === 401) { window.location.href='/login'; return; }
     const payload = await jsonResponse(response);

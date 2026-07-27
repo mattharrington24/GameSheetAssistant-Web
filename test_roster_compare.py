@@ -35,7 +35,10 @@ def test_parse_and_compare_rosters():
         ("7", "Maya Jones", "G", "9"),
     ]))
     result = compare_rosters(previous, current)
-    assert result["counts"] == {"previous": 2, "current": 2, "returning": 1, "new": 1, "departed": 1}
+    assert result["counts"] == {
+        "previous": 2, "current": 2, "returning": 1, "new": 1,
+        "departed": 1, "possible_matches": 0,
+    }
     assert result["returning"][0]["current"]["name"] == "Smith, Anna"
     assert result["new"][0]["name"] == "Maya Jones"
     assert result["departed"][0]["name"] == "Grace Lee"
@@ -115,3 +118,33 @@ def test_transfer_finder_confirms_ava_lindsay():
     assert result["ava_lindsay_found"] is True
     assert result["transfers"][0]["previous_team"] == "Breck"
     assert result["transfers"][0]["current_team"] == "Minnetonka"
+
+
+def test_known_nickname_alias_is_returning():
+    previous = parse_roster(roster_html("Andover - 2020-21", [
+        ("6", "Isa Goettl", "F", "10"),
+    ]))
+    current = parse_roster(roster_html("Andover - 2021-22", [
+        ("6", "Isabel Goettl", "F", "11"),
+    ]))
+    result = compare_rosters(previous, current)
+    assert result["counts"]["returning"] == 1
+    assert result["counts"]["new"] == 0
+    assert result["counts"]["departed"] == 0
+
+
+def test_similar_same_last_name_is_suggested_then_custom_alias_matches():
+    previous = parse_roster(roster_html("Example - 2020-21", [
+        ("4", "Madi Nelson", "D", "9"),
+    ]))
+    current = parse_roster(roster_html("Example - 2021-22", [
+        ("4", "Madison Nelson", "D", "10"),
+    ]))
+    suggested = compare_rosters(previous, current)
+    assert suggested["counts"]["possible_matches"] == 1
+    matched = compare_rosters(
+        previous,
+        current,
+        [{"previous": "Madi Nelson", "current": "Madison Nelson"}],
+    )
+    assert matched["counts"]["returning"] == 1

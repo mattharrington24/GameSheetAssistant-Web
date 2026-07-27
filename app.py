@@ -11,6 +11,7 @@ from flask import Flask, jsonify, redirect, render_template, request, session, u
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from web_parser import SportsEngineParser
+from roster_compare import compare_rosters, parse_roster
 
 app = Flask(__name__)
 app.config.update(
@@ -28,6 +29,7 @@ SPORTSENGINE_HOSTS = {
     "mngirlshockeyhub.com",
 }
 GAME_ID_RE = re.compile(r"^\d{6,12}$")
+ROSTER_ID_RE = re.compile(r"^\d{6,12}$")
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "").strip()
 
 
@@ -70,6 +72,18 @@ def fetch_game(url: str) -> str:
     return response.text
 
 
+def normalize_roster_input(value: str) -> str:
+    value = value.strip()
+    if ROSTER_ID_RE.fullmatch(value):
+        return f"https://stats.mngirlshockeyhub.com/roster/show/{value}"
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or parsed.hostname not in SPORTSENGINE_HOSTS:
+        raise ValueError("Enter a MN Girls Hockey Hub SportsEngine roster URL.")
+    if not re.fullmatch(r"/roster/show/\d+", parsed.path.rstrip("/")):
+        raise ValueError("The URL must be a SportsEngine roster page.")
+    return value
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if not APP_PASSWORD:
@@ -98,6 +112,12 @@ def index():
     return render_template("index.html", auth_enabled=bool(APP_PASSWORD))
 
 
+@app.get("/rosters")
+@auth_required
+def rosters():
+    return render_template("rosters.html", auth_enabled=bool(APP_PASSWORD))
+
+
 @app.post("/api/import")
 @auth_required
 def import_game():
@@ -114,6 +134,26 @@ def import_game():
     except Exception as error:
         app.logger.exception("Unexpected import error")
         return jsonify({"ok": False, "error": f"Unexpected parser error: {error}"}), 500
+
+
+@app.post("/api/rosters/compare")
+@auth_required
+def compare_roster_pages():
+    payload = request.get_json(silent=True) or {}
+    try:
+        previous_url = normalize_roster_input(str(payload.get("previous_url", "")))
+        current_url = normalize_roster_input(str(payload.get("current_url", "")))
+        previous = parse_roster(fetch_game(previous_url))
+        current = parse_roster(fetch_game(current_url))
+        result = compare_rosters(previous, current)
+        result["previous"]["source_url"] = previous_url
+        result["current"]["source_url"] = current_url
+        return jsonify({"ok": True, "data": result})
+    except (ValueError, requests.RequestException) as error:
+        return jsonify({"ok": False, "error": str(error)}), 400
+    except Exception as error:
+        app.logger.exception("Unexpected roster comparison error")
+        return jsonify({"ok": False, "error": f"Unexpected roster comparison error: {error}"}), 500
 
 
 @app.get("/health")

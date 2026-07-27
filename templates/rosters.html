@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07172b">
+  <title>Roster Comparison · GameSheet Assistant</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-wrap">
+      <div class="brand-mark" aria-hidden="true">🏒</div>
+      <div>
+        <p class="eyebrow">MINNESOTA HOCKEY DATA ENTRY</p>
+        <h1>Roster Comparison</h1>
+      </div>
+    </div>
+    <div class="top-actions">
+      <a class="ghost-on-dark nav-link" href="{{ url_for('index') }}">GameSheet Assistant</a>
+      {% if auth_enabled %}
+      <form method="post" action="{{ url_for('logout') }}"><button class="ghost-on-dark" type="submit">Sign out</button></form>
+      {% endif %}
+    </div>
+  </header>
+
+  <main class="roster-shell">
+    <section class="card roster-form">
+      <div>
+        <p class="eyebrow">YEAR-TO-YEAR CHECK</p>
+        <h2>Who returned, who is new, and who left?</h2>
+        <p class="form-help">Paste the older roster first and the following season’s roster second.</p>
+      </div>
+      <label for="previousRoster">Previous-season SportsEngine roster URL</label>
+      <input id="previousRoster" type="url" placeholder="https://stats.mngirlshockeyhub.com/roster/show/..." autocomplete="off">
+      <label for="currentRoster">Current-season SportsEngine roster URL</label>
+      <input id="currentRoster" type="url" placeholder="https://stats.mngirlshockeyhub.com/roster/show/..." autocomplete="off">
+      <button id="compareRosters" class="primary">Compare Rosters</button>
+      <div id="rosterError" class="error hidden"></div>
+    </section>
+
+    <section id="rosterResults" class="hidden">
+      <section class="card comparison-summary">
+        <div>
+          <p class="eyebrow">COMPARISON COMPLETE</p>
+          <h2 id="comparisonTitle">Roster Results</h2>
+        </div>
+        <div class="comparison-counts">
+          <div><strong id="returningCount">0</strong><span>Returning</span></div>
+          <div><strong id="newCount">0</strong><span>New</span></div>
+          <div><strong id="departedCount">0</strong><span>Departed</span></div>
+        </div>
+      </section>
+      <div class="roster-columns">
+        <section class="card result-group returning-group">
+          <div class="result-heading"><div><p class="eyebrow">BOTH SEASONS</p><h2>Returning</h2></div><button data-copy="returning">Copy</button></div>
+          <div id="returningPlayers" class="player-list"></div>
+        </section>
+        <section class="card result-group new-group">
+          <div class="result-heading"><div><p class="eyebrow">CURRENT SEASON ONLY</p><h2>New</h2></div><button data-copy="new">Copy</button></div>
+          <div id="newPlayers" class="player-list"></div>
+        </section>
+        <section class="card result-group departed-group">
+          <div class="result-heading"><div><p class="eyebrow">PREVIOUS SEASON ONLY</p><h2>Departed</h2></div><button data-copy="departed">Copy</button></div>
+          <div id="departedPlayers" class="player-list"></div>
+        </section>
+      </div>
+    </section>
+  </main>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"><span id="toastMessage"></span></div>
+  <script src="{{ url_for('static', filename='rosters.js') }}"></script>
+</body>
+</html>

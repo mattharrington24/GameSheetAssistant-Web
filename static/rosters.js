@@ -94,6 +94,18 @@ function showTransferError(message) {
   $('transferError').classList.toggle('hidden', !message);
 }
 
+async function jsonResponse(response) {
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    if (response.status >= 500) {
+      throw new Error('The server restarted during the scan. Please wait a moment and try again.');
+    }
+    throw new Error('The server returned an unexpected response. Please refresh and try again.');
+  }
+}
+
 function transferRow(item) {
   const confidence = item.confidence === 'Likely' ? '' : ' · Review name duplicates';
   return `<article class="player-row transfer-row"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.previous_team)} → ${escapeHtml(item.current_team)}${confidence}</span></article>`;
@@ -122,7 +134,7 @@ function renderTransfers(data) {
 async function pollTransferJob(jobId) {
   const response = await fetch(`/api/transfers/status/${jobId}`);
   if (response.status === 401) { window.location.href='/login'; return; }
-  const payload = await response.json();
+  const payload = await jsonResponse(response);
   if (!response.ok || !payload.ok) throw new Error(payload.error || 'Could not check transfer scan.');
   const job = payload.job;
   const total = Math.max(1, Number(job.total || 1));
@@ -168,7 +180,7 @@ async function findTransfers() {
       body: JSON.stringify({previous_url:previousUrl, current_url:currentUrl}),
     });
     if (response.status === 401) { window.location.href='/login'; return; }
-    const payload = await response.json();
+    const payload = await jsonResponse(response);
     if (!response.ok || !payload.ok) throw new Error(payload.error || 'Could not start transfer scan.');
     await pollTransferJob(payload.job_id);
   } catch (error) {

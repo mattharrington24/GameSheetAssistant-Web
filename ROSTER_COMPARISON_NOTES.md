@@ -19,3 +19,7 @@ Open **Find Transfers**, paste two consecutive season-hub URLs, and start the
 scan. The tool discovers linked team and roster pages, compares exact names
 across schools, flags duplicate names for review, reports pages that failed,
 and verifies the known Ava Lindsay transfer from Breck to Minnetonka.
+
+The scanner processes SportsEngine pages in a small, bounded stream and uses a
+single Gunicorn worker so statewide scans remain within Render's 512 MB free
+instance memory limit.

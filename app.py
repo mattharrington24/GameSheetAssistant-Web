@@ -132,18 +132,16 @@ def _read_job(job_id: str) -> dict | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _fetch_many(urls: list[str], workers: int = 10) -> tuple[dict[str, str], list[dict[str, str]]]:
-    pages: dict[str, str] = {}
-    failures: list[dict[str, str]] = []
+def _fetch_pages(urls: list[str], workers: int = 3):
+    """Yield fetched pages immediately so large HTML responses are not retained."""
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {executor.submit(fetch_game, url): url for url in urls}
         for future in as_completed(futures):
-            url = futures[future]
+            url = futures.pop(future)
             try:
-                pages[url] = future.result()
+                yield url, future.result(), None
             except Exception as error:
-                failures.append({"url": url, "error": str(error)})
-    return pages, failures
+                yield url, None, str(error)
 
 
 def _discover_season_rosters(hub_url: str, update) -> tuple[list[dict], list[dict]]:
@@ -159,10 +157,11 @@ def _discover_season_rosters(hub_url: str, update) -> tuple[list[dict], list[dic
         if not frontier:
             break
         update(f"Discovering team pages ({depth + 1}/3)", len(visited), len(visited) + len(frontier))
-        pages, page_failures = _fetch_many(frontier)
-        failures.extend(page_failures)
         next_frontier: set[str] = set()
-        for url, html in pages.items():
+        for url, html, error in _fetch_pages(frontier):
+            if error:
+                failures.append({"url": url, "error": error})
+                continue
             visited.add(url)
             roster_urls.update(season_links(html, url, "roster"))
             team_urls.update(sportsengine_team_links(html, url))
@@ -176,10 +175,11 @@ def _discover_season_rosters(hub_url: str, update) -> tuple[list[dict], list[dic
         raise ValueError("No team roster links were found from this season hub.")
 
     update("Reading team rosters", 0, len(roster_urls))
-    roster_pages, roster_failures = _fetch_many(sorted(roster_urls), workers=8)
-    failures.extend(roster_failures)
     rosters: list[dict] = []
-    for index, (url, html) in enumerate(roster_pages.items(), 1):
+    for index, (url, html, error) in enumerate(_fetch_pages(sorted(roster_urls)), 1):
+        if error:
+            failures.append({"url": url, "error": error})
+            continue
         try:
             roster = parse_roster(html)
             roster["team"] = roster_team_name(roster["title"])
@@ -187,7 +187,7 @@ def _discover_season_rosters(hub_url: str, update) -> tuple[list[dict], list[dic
             rosters.append(roster)
         except ValueError as error:
             failures.append({"url": url, "error": str(error)})
-        if index % 5 == 0 or index == len(roster_pages):
+        if index % 5 == 0 or index == len(roster_urls):
             update("Reading team rosters", index, len(roster_urls))
     return rosters, failures
 

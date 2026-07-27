@@ -4,7 +4,9 @@ from roster_compare import (
     normalize_name,
     parse_roster,
     roster_team_name,
+    roster_url_for_team_page,
     season_links,
+    sportsengine_team_links,
 )
 
 
@@ -61,6 +63,40 @@ def test_season_link_discovery_keeps_subseason():
     assert season_links(html, source, "roster") == [
         "https://stats.mngirlshockeyhub.com/roster/show/333?subseason=697635"
     ]
+
+
+def test_season_link_discovery_reads_sportsengine_page_nav():
+    html = """
+    <script>
+    var pageNav = {"name":"MSHSL","children":[
+      {"name":"Lake","url":"/page/show/5878610-lake?subseason=697635","children":[]},
+      {"name":"Metro West","url":"/page/show/5878649-metro-west?subseason=697635","children":[]}
+    ]};
+    </script>
+    """
+    source = "https://stats.mngirlshockeyhub.com/page/show/5878509?subseason=697635"
+    assert season_links(html, source, "page") == [
+        "https://stats.mngirlshockeyhub.com/page/show/5878610-lake?subseason=697635",
+        "https://stats.mngirlshockeyhub.com/page/show/5878649-metro-west?subseason=697635",
+    ]
+
+
+def test_team_nav_links_and_roster_pairing():
+    html = """
+    <script>
+    var pageNav = {"node_type":"DivisionInstance","children":[
+      {"node_type":"TeamInstance","url":"/page/show/5878655-holy-angels?subseason=697635","children":[]}
+    ]};
+    </script>
+    """
+    source = "https://stats.mngirlshockeyhub.com/page/show/5878649?subseason=697635"
+    teams = sportsengine_team_links(html, source)
+    assert teams == [
+        "https://stats.mngirlshockeyhub.com/page/show/5878655-holy-angels?subseason=697635"
+    ]
+    assert roster_url_for_team_page(teams[0]) == (
+        "https://stats.mngirlshockeyhub.com/roster/show/5878656?subseason=697635"
+    )
 
 
 def test_team_name_from_sportsengine_title():

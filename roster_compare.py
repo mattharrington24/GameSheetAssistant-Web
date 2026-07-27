@@ -121,8 +121,28 @@ def season_links(html: str, source_url: str, link_type: str) -> list[str]:
     pattern = r"^/page/show/\d+" if link_type == "page" else r"^/roster/show/\d+"
     soup = BeautifulSoup(html, "lxml")
     links: set[str] = set()
-    for anchor in soup.find_all("a", href=True):
-        absolute = urljoin(source_url, anchor["href"])
+    raw_links = [anchor["href"] for anchor in soup.find_all("a", href=True)]
+
+    # SportsEngine builds conference/team navigation from a JSON object in
+    # JavaScript. Those URLs do not exist as normal anchors in the downloaded
+    # HTML, so include the current node's children explicitly.
+    nav_match = re.search(r"var\s+pageNav\s*=\s*(\{.*?\});", html, re.DOTALL)
+    if nav_match:
+        try:
+            nav = __import__("json").loads(nav_match.group(1))
+
+            def child_urls(node: dict[str, Any]) -> None:
+                for child in node.get("children", []) or []:
+                    if child.get("url"):
+                        raw_links.append(str(child["url"]))
+                    child_urls(child)
+
+            child_urls(nav)
+        except (ValueError, TypeError):
+            pass
+
+    for raw_link in raw_links:
+        absolute = urljoin(source_url, raw_link)
         parsed = urlparse(absolute)
         if parsed.hostname not in SPORTSENGINE_HOSTS or not re.match(pattern, parsed.path):
             continue
@@ -139,6 +159,50 @@ def season_links(html: str, source_url: str, link_type: str) -> list[str]:
         )
         links.add(urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", query_text, "")))
     return sorted(links)
+
+
+def sportsengine_team_links(html: str, source_url: str) -> list[str]:
+    """Read TeamInstance URLs from SportsEngine's generated page navigation."""
+    source = urlparse(source_url)
+    subseason = parse_qs(source.query).get("subseason", [""])[0]
+    nav_match = re.search(r"var\s+pageNav\s*=\s*(\{.*?\});", html, re.DOTALL)
+    if not nav_match:
+        return []
+    try:
+        nav = __import__("json").loads(nav_match.group(1))
+    except (ValueError, TypeError):
+        return []
+    links: set[str] = set()
+
+    def visit(node: dict[str, Any]) -> None:
+        if node.get("node_type") == "TeamInstance" and node.get("url"):
+            absolute = urljoin(source_url, str(node["url"]))
+            parsed = urlparse(absolute)
+            if parsed.hostname in SPORTSENGINE_HOSTS:
+                query = parse_qs(parsed.query)
+                if subseason:
+                    query["subseason"] = [subseason]
+                query_text = "&".join(
+                    f"{key}={value}"
+                    for key in sorted(query)
+                    for value in query[key]
+                )
+                links.add(urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", query_text, "")))
+        for child in node.get("children", []) or []:
+            visit(child)
+
+    visit(nav)
+    return sorted(links)
+
+
+def roster_url_for_team_page(team_url: str) -> str:
+    """SportsEngine creates a team's roster node immediately after its team node."""
+    parsed = urlparse(team_url)
+    match = re.match(r"^/page/show/(\d+)", parsed.path)
+    if not match:
+        raise ValueError("Invalid SportsEngine team page.")
+    roster_id = int(match.group(1)) + 1
+    return urlunparse((parsed.scheme, parsed.netloc, f"/roster/show/{roster_id}", "", parsed.query, ""))
 
 
 def find_transfers(previous_rosters: list[dict[str, Any]], current_rosters: list[dict[str, Any]]) -> dict[str, Any]:

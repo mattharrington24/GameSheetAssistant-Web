@@ -22,7 +22,9 @@ from roster_compare import (
     find_transfers,
     parse_roster,
     roster_team_name,
+    roster_url_for_team_page,
     season_links,
+    sportsengine_team_links,
 )
 
 app = Flask(__name__)
@@ -149,6 +151,7 @@ def _discover_season_rosters(hub_url: str, update) -> tuple[list[dict], list[dic
     visited = {hub_url}
     frontier = season_links(hub_html, hub_url, "page")
     roster_urls = set(season_links(hub_html, hub_url, "roster"))
+    team_urls = set(sportsengine_team_links(hub_html, hub_url))
     failures: list[dict[str, str]] = []
 
     for depth in range(3):
@@ -162,9 +165,13 @@ def _discover_season_rosters(hub_url: str, update) -> tuple[list[dict], list[dic
         for url, html in pages.items():
             visited.add(url)
             roster_urls.update(season_links(html, url, "roster"))
+            team_urls.update(sportsengine_team_links(html, url))
             next_frontier.update(season_links(html, url, "page"))
         frontier = sorted(next_frontier - visited)
 
+    # Historical SportsEngine pages often omit the roster tab from server-side
+    # HTML. Team and roster nodes are paired sequentially in these league trees.
+    roster_urls.update(roster_url_for_team_page(url) for url in team_urls)
     if not roster_urls:
         raise ValueError("No team roster links were found from this season hub.")
 

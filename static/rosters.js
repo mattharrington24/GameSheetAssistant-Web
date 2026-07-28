@@ -58,7 +58,7 @@ function renderPossibleMatches(matches) {
   $('possibleMatchPlayers').innerHTML = matches.map((item, index) =>
     `<article class="player-row possible-row">
       <strong>${escapeHtml(item.previous.name)} → ${escapeHtml(item.current.name)}</strong>
-      <span>Same last name; first names may be a nickname or spelling variation.</span>
+      <span>These unmatched players share a last name across the two seasons.</span>
       <button class="success confirm-alias" data-index="${index}">Confirm Match</button>
     </article>`
   ).join('');

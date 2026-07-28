@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from difflib import SequenceMatcher
 from typing import Any
 from urllib.parse import parse_qs, urljoin, urlparse, urlunparse
 
@@ -76,33 +75,22 @@ def possible_name_matches(
     previous_players: list[dict[str, str]],
     current_players: list[dict[str, str]],
 ) -> list[dict[str, Any]]:
-    candidates: list[tuple[float, dict[str, str], dict[str, str]]] = []
-    for previous in previous_players:
-        old_first, old_last = _name_parts(previous["name"])
-        for current in current_players:
-            new_first, new_last = _name_parts(current["name"])
-            if not old_last or old_last != new_last or not old_first or not new_first:
-                continue
-            similarity = SequenceMatcher(None, old_first, new_first).ratio()
-            prefix_match = (
-                min(len(old_first), len(new_first)) >= 3
-                and (old_first.startswith(new_first) or new_first.startswith(old_first))
-            )
-            if prefix_match or similarity >= 0.72:
-                candidates.append((similarity, previous, current))
-
     matches: list[dict[str, Any]] = []
-    used_previous: set[str] = set()
-    used_current: set[str] = set()
-    for similarity, previous, current in sorted(candidates, key=lambda item: item[0], reverse=True):
-        old_key = normalize_name(previous["name"])
-        new_key = normalize_name(current["name"])
-        if old_key in used_previous or new_key in used_current:
-            continue
-        used_previous.add(old_key)
-        used_current.add(new_key)
-        matches.append({"previous": previous, "current": current, "similarity": round(similarity, 2)})
-    return matches
+    for previous in previous_players:
+        _, old_last = _name_parts(previous["name"])
+        for current in current_players:
+            _, new_last = _name_parts(current["name"])
+            if not old_last or old_last != new_last:
+                continue
+            matches.append({"previous": previous, "current": current})
+    return sorted(
+        matches,
+        key=lambda item: (
+            _name_parts(item["previous"]["name"])[1],
+            item["previous"]["name"].casefold(),
+            item["current"]["name"].casefold(),
+        ),
+    )
 
 
 def normalize_team(value: str) -> str:

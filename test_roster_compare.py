@@ -148,3 +148,25 @@ def test_similar_same_last_name_is_suggested_then_custom_alias_matches():
         [{"previous": "Madi Nelson", "current": "Madison Nelson"}],
     )
     assert matched["counts"]["returning"] == 1
+
+
+def test_all_unmatched_shared_last_names_need_review_even_when_first_names_differ():
+    previous = parse_roster(roster_html("Example - 2020-21", [
+        ("4", "Izzy Carter", "F", "9"),
+        ("8", "Mia Carter", "D", "11"),
+    ]))
+    current = parse_roster(roster_html("Example - 2021-22", [
+        ("4", "Elizabeth Carter", "F", "10"),
+        ("9", "Sophia Carter", "D", "9"),
+    ]))
+    result = compare_rosters(previous, current)
+    pairs = {
+        (item["previous"]["name"], item["current"]["name"])
+        for item in result["possible_matches"]
+    }
+    assert pairs == {
+        ("Izzy Carter", "Elizabeth Carter"),
+        ("Izzy Carter", "Sophia Carter"),
+        ("Mia Carter", "Elizabeth Carter"),
+        ("Mia Carter", "Sophia Carter"),
+    }

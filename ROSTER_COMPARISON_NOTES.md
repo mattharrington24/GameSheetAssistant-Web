@@ -28,6 +28,7 @@ instance memory limit.
 
 Nickname and formal-name changes can be matched without creating false
 departures. Isa Goettl and Isabel Goettl are built in as the first confirmed
-alias. Other same-last-name variations appear under **Possible Matches**; using
+alias. Every unmatched pair sharing a last name appears under **Needs Review**,
+regardless of how similar the first names are. Using
 **Confirm Match** remembers that alias in the current browser and applies it to
 future roster comparisons and transfer scans.

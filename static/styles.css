@@ -181,3 +181,4 @@ button.danger-ghost { color:var(--bad); border-color:rgba(180,35,24,.25); }
 .workflow-card.kind-goalie-change .workflow-body { background:linear-gradient(135deg,rgba(226,165,60,.12),transparent 58%); }
 .workflow-card.workflow-warning { border-color:rgba(196,71,54,.48); }
 .workflow-card.workflow-warning .workflow-body { background:linear-gradient(135deg,rgba(196,71,54,.06),transparent 55%); }
+.web-fill-button{border-color:#16a34a;color:#15803d;background:#f0fdf4}

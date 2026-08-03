@@ -45,6 +45,51 @@ function showToast(message,{actionLabel='',onAction=null,duration=1500}={}){
 }
 async function copyCurrentStep(){if(!state.data)return;const s=state.data.workflow[state.workflowIndex];await navigator.clipboard.writeText(`${s.title}\n\n${s.body}`);showToast('Step copied to clipboard');}
 
+function numericPeriodShots(values, count){
+  return (values||[]).slice(0,count).map(value=>Number.isFinite(Number(value))?Number(value):null);
+}
+function playedGoaliesFor(team){
+  return (state.data.goalies||[]).filter(g=>g.team===team&&g.minutes!=='0:00');
+}
+function clockSeconds(value){const [m,s]=String(value||'').split(':').map(Number);return Number.isFinite(m)&&Number.isFinite(s)?m*60+s:null;}
+function clockText(seconds){const safe=Math.max(0,seconds);return `${Math.floor(safe/60)}:${String(safe%60).padStart(2,'0')}`;}
+function penaltyRelease(penalty,goals,length){
+  if(/penalty shot/i.test(penalty.penalty))return penalty.remaining;
+  const off=clockSeconds(penalty.remaining);if(off===null)return '';
+  const scheduled=Math.max(0,off-(Number(length)||2)*60);
+  const earlyGoal=goals.find(goal=>goal.period===penalty.period&&goal.team!==penalty.team&&/power play/i.test(goal.strength||'')&&clockSeconds(goal.remaining)<off&&clockSeconds(goal.remaining)>scheduled);
+  return earlyGoal?earlyGoal.remaining:clockText(scheduled);
+}
+function buildWebFillPayload(){
+  const {game,shots,goals,penalties,goalies,source_url}=state.data;
+  const periodCount=(shots.periods||[]).length;
+  const awayPlayed=playedGoaliesFor(game.away_team);
+  const homePlayed=playedGoaliesFor(game.home_team);
+  const goalieShotRows=[];
+  if(awayPlayed.length===1)goalieShotRows.push({team:game.away_team,goalie:`#${awayPlayed[0].number} ${awayPlayed[0].name}`,periods:numericPeriodShots(shots.home,periodCount)});
+  if(homePlayed.length===1)goalieShotRows.push({team:game.home_team,goalie:`#${homePlayed[0].number} ${homePlayed[0].name}`,periods:numericPeriodShots(shots.away,periodCount)});
+  const warnings=[];
+  if(awayPlayed.length!==1)warnings.push(`${game.away_team}: ${awayPlayed.length} goalies played; enter goalie shifts and split shots manually.`);
+  if(homePlayed.length!==1)warnings.push(`${game.home_team}: ${homePlayed.length} goalies played; enter goalie shifts and split shots manually.`);
+  if((shots.periods||[]).some((_,i)=>numericPeriodShots(shots.away,periodCount)[i]===null||numericPeriodShots(shots.home,periodCount)[i]===null))warnings.push('At least one period shot total is missing; review shots manually.');
+  return {
+    format:'gamesheet-assistant-web-fill',version:1,source_url,
+    game:{away_team:game.away_team,home_team:game.home_team,away_score:Number(game.away_score),home_score:Number(game.home_score),date:game.date},
+    periods:shots.periods,
+    goals:goals.map(g=>({team:g.team,period:g.period,time:g.remaining,player:g.scorer,assists:g.assists||[],strength:g.strength})),
+    penalties:penalties.map(p=>{const length=(p.penalty.match(/(\d+)\s*(?:min|minute)/i)||[])[1]||'2';return {team:p.team,period:p.period,offender:p.player,served_by:p.player,length,code:p.penalty,time_off:p.remaining,time_start:p.remaining,time_on:penaltyRelease(p,goals,length)};}),
+    goalie_shots:goalieShotRows,
+    goalies:goalies.map(g=>({team:g.team,number:g.number,name:g.name,minutes:g.minutes,shots_against:g.shots_against,goals_against:g.goals_against,saves:g.saves})),
+    warnings
+  };
+}
+async function copyWebFillData(){
+  if(!state.data)return;
+  const payload=buildWebFillPayload();
+  await navigator.clipboard.writeText(JSON.stringify(payload));
+  showToast(payload.warnings.length?'Web data copied — review warnings in the Chrome helper':'Web fill data copied',{duration:3500});
+}
+
 async function importGame(rawValue,{fromBatch=false}={}){
   const value=rawValue.trim(); if(!value)return showError('Enter a SportsEngine URL or game ID.');
   setLoading(true);showError('');
@@ -197,7 +242,7 @@ function updateBatchStatus(){
 $('importButton').addEventListener('click',()=>importGame($('gameInput').value));
 $('gameInput').addEventListener('keydown',e=>{if(e.key==='Enter')importGame(e.target.value)});
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>selectTab(b.dataset.tab)));
-$('previousStep').addEventListener('click',()=>changeWorkflow(-1));$('nextStep').addEventListener('click',()=>changeWorkflow(1));$('copyStep').addEventListener('click',copyCurrentStep);$('finishGame').addEventListener('click',finishCurrentGame);
+$('previousStep').addEventListener('click',()=>changeWorkflow(-1));$('nextStep').addEventListener('click',()=>changeWorkflow(1));$('copyStep').addEventListener('click',copyCurrentStep);$('copyWebFill').addEventListener('click',copyWebFillData);$('finishGame').addEventListener('click',finishCurrentGame);
 $('loadBatch').addEventListener('click',loadBatch);$('previousGame').addEventListener('click',()=>moveGame(-1));$('skipGame').addEventListener('click',()=>moveGame(1,{skip:true}));$('nextGame').addEventListener('click',()=>moveGame(1));$('clearBatch').addEventListener('click',clearBatch);
 $('autoCopyToggle').addEventListener('change',e=>{prefs.autoCopy=e.target.checked;savePrefs();showToast(prefs.autoCopy?'Auto-copy enabled':'Auto-copy disabled');});
 $('compactModeToggle').addEventListener('change',e=>{prefs.compact=e.target.checked;document.body.classList.toggle('compact-workflow',prefs.compact);savePrefs();});

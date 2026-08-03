@@ -12,9 +12,11 @@ async function send(action){
     const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
     const response=await chrome.tabs.sendMessage(tab.id,{action,data});
     if(!response?.ok)throw new Error(response?.error||'The GameSheet page did not respond.');
+    if(action==='analyze'&&response.diagnostic){await navigator.clipboard.writeText(JSON.stringify(response.diagnostic,null,2));summary.insertAdjacentHTML('beforeend','<p><b>Form report copied.</b> Paste it into the ChatGPT conversation.</p>');return;}
     summary.insertAdjacentHTML('beforeend',`<p>${response.message}</p>`);
   }catch(e){error.textContent=e.message;}
 }
 document.getElementById('inspect').onclick=()=>send('inspect');
+document.getElementById('analyze').onclick=()=>send('analyze');
 document.getElementById('fill').onclick=()=>{if(confirm('Fill the open GameSheet form? You must review it and click Save Changes yourself.'))send('fill');};
 navigator.clipboard.readText().then(text=>{if(text.includes('gamesheet-assistant-web-fill'))input.value=text;}).catch(()=>{});

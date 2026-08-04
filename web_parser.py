@@ -33,6 +33,58 @@ def _resolve_missing_period_shots(values: list[str], period_count: int) -> list[
         resolved[missing[0]] = str(inferred)
     return resolved
 
+
+def _clock_seconds(value: str) -> int | None:
+    """Convert a hockey clock value to seconds, returning None when invalid."""
+    match = re.fullmatch(r"(\d+):(\d{2})", str(value).strip())
+    if not match:
+        return None
+    return int(match.group(1)) * 60 + int(match.group(2))
+
+
+def _clock_text(seconds: int) -> str:
+    return f"{seconds // 60}:{seconds % 60:02d}"
+
+
+def _normalize_overtime_goalie_minutes(
+    game: dict[str, str],
+    shots: dict[str, Any],
+    goals: list[dict[str, Any]],
+    goalies: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """Correct SportsEngine's 51:00 full-game goalie total for overtime games.
+
+    Some legacy box scores leave the goalie at the regulation total even though
+    the game reached overtime. A tied game uses the full eight-minute overtime.
+    A decided game ends at the elapsed time of its overtime winning goal.
+    Multi-goalie teams are left unchanged because their split remains ambiguous.
+    """
+    periods = [str(period).upper() for period in shots.get("periods", [])]
+    overtime_goals = [goal for goal in goals if str(goal.get("period", "")).upper().startswith("OT")]
+    has_overtime = (
+        "OT" in str(game.get("status", "")).upper()
+        or any(period.startswith("OT") for period in periods)
+        or bool(overtime_goals)
+    )
+    if not has_overtime:
+        return goalies
+
+    if int(game["away_score"]) == int(game["home_score"]):
+        total_seconds = 59 * 60
+    else:
+        elapsed = [_clock_seconds(str(goal.get("elapsed", ""))) for goal in overtime_goals]
+        valid_elapsed = [seconds for seconds in elapsed if seconds is not None]
+        if not valid_elapsed:
+            return goalies
+        total_seconds = 51 * 60 + max(valid_elapsed)
+
+    normalized = [dict(goalie) for goalie in goalies]
+    for team in (game["away_team"], game["home_team"]):
+        played = [goalie for goalie in normalized if goalie["team"] == team and goalie["minutes"] != "0:00"]
+        if len(played) == 1 and played[0]["minutes"] == "51:00":
+            played[0]["minutes"] = _clock_text(total_seconds)
+    return normalized
+
 TIME_RE = re.compile(r"^\d{1,2}:\d{2}$")
 PERIOD_RE = re.compile(r"^(1st|2nd|3rd|OT\d*)$", re.IGNORECASE)
 SCORE_RE = re.compile(r"^\d+$")
@@ -304,7 +356,7 @@ class SportsEngineParser:
         shots = self.shots()
         goals = self.goals()
         penalties = self.penalties()
-        goalies = self.goalies()
+        goalies = _normalize_overtime_goalie_minutes(game, shots, goals, self.goalies())
         return {
             "game": game,
             "shots": shots,

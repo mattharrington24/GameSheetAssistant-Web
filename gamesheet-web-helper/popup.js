@@ -1,4 +1,5 @@
 const input=document.getElementById('payload'),summary=document.getElementById('summary'),error=document.getElementById('error');
+document.getElementById('helperVersion').textContent=`v${chrome.runtime.getManifest().version}`;
 function parse(){
   error.textContent='';
   const data=JSON.parse(input.value.trim());
@@ -10,7 +11,13 @@ async function send(action){
     const data=parse();
     summary.innerHTML=`<p><b>${data.game.away_team} ${data.game.away_score} – ${data.game.home_score} ${data.game.home_team}</b><br>${data.goals.length} goals · ${data.penalties.length} penalties</p>${data.warnings.length?`<ul>${data.warnings.map(w=>`<li>${w}</li>`).join('')}</ul>`:''}`;
     const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
-    const response=await chrome.tabs.sendMessage(tab.id,{action,data});
+    let response;
+    try{response=await chrome.tabs.sendMessage(tab.id,{action,data});}
+    catch(messageError){
+      if(!String(messageError.message||messageError).includes('Receiving end does not exist'))throw messageError;
+      await chrome.scripting.executeScript({target:{tabId:tab.id},files:['content.js']});
+      response=await chrome.tabs.sendMessage(tab.id,{action,data});
+    }
     if(!response?.ok)throw new Error(response?.error||'The GameSheet page did not respond.');
     if(action==='analyze'&&response.diagnostic){await navigator.clipboard.writeText(JSON.stringify(response.diagnostic,null,2));summary.insertAdjacentHTML('beforeend','<p><b>Form report copied.</b> Paste it into the ChatGPT conversation.</p>');return;}
     summary.insertAdjacentHTML('beforeend',`<p>${response.message}</p>`);

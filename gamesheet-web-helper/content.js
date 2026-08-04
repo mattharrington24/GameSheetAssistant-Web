@@ -142,6 +142,24 @@ async function fillGoalieShifts(data){
     setInput(inputs[0],gameSheetTime(shift.time));setSelect(selects[0],periodValue(shift.period));await pause(500);
   }
 }
+function fillStartingGoalies(data){
+  if(!data.starting_goalies?.length)return;
+  const start=heading('Lineups'),end=heading('Goalie shifts');
+  if(!start||!end)throw new Error('Lineups section was not found.');
+  const rows=groupsByRow(controlsBetween(start,end));
+  for(const target of data.starting_goalies){
+    const wanted=norm(target.goalie),number=(wanted.match(/\b\d+\b/)||[])[0],last=wanted.split(' ').at(-1);
+    const row=rows.find(candidate=>{
+      const text=nearbyText(candidate.controls[0]);
+      const values=candidate.controls.map(control=>norm(control.value)).join(' ');
+      return (!number||new RegExp(`\\b${number}\\b`).test(`${text} ${values}`))&&(!last||text.includes(last));
+    });
+    if(!row)throw new Error(`Could not find the lineup row for ${target.goalie}.`);
+    const status=row.controls.find(control=>control.tagName==='SELECT'&&[...control.options].some(option=>norm(option.textContent)==='starting'));
+    if(!status)throw new Error(`The lineup row for ${target.goalie} has no Starting status field.`);
+    setSelect(status,'Starting');
+  }
+}
 function nearbyText(el){const row=el.closest('tr')||el.parentElement?.parentElement||el.parentElement;return norm(row?.textContent);}
 function fillShots(data){
   const start=heading('Shots'),end=heading('Scoring');if(!start||!end)throw new Error('Shots section was not found.');
@@ -155,14 +173,16 @@ function fillShots(data){
 }
 function inspect(data){
   if(!heading('Edit Game'))throw new Error('Open a GameSheet Edit Game page first.');
-  const body=norm(document.body.textContent);
+  const formValues=all('input,select').map(el=>el.tagName==='SELECT'?el.options?.[el.selectedIndex]?.textContent:el.value).join(' ');
+  const body=norm(`${document.body.textContent} ${formValues}`);
   const teamOnPage=team=>{
     const full=norm(team);if(body.includes(full))return true;
     const meaningful=full.split(' ').filter(word=>word.length>=5);
     return meaningful.some(word=>new RegExp(`\\b${word}\\b`).test(body));
   };
-  if(!teamOnPage(data.game.away_team)||!teamOnPage(data.game.home_team))throw new Error('The teams on this GameSheet page do not match the copied game.');
-  return `Page matched. Ready for ${data.goals.length} goals and ${data.penalties.length} penalties.`;
+  const missing=[data.game.away_team,data.game.home_team].filter(team=>!teamOnPage(team));
+  if(missing.length)throw new Error(`Helper ${chrome.runtime.getManifest().version}: Could not match ${missing.join(' or ')} on this GameSheet page.`);
+  return `Helper ${chrome.runtime.getManifest().version}: Page matched. Ready for ${data.goals.length} goals and ${data.penalties.length} penalties.`;
 }
 function analyzeForm(){
   const scoring=heading('Scoring'),penalties=heading('Penalties'),shootouts=heading('Shootouts');if(!scoring||!penalties||!shootouts)throw new Error('Scoring or Penalties section was not found.');
@@ -180,6 +200,7 @@ chrome.runtime.onMessage.addListener((request,_sender,respond)=>{
     if(request.action!=='fill'){respond({ok:true,message});return;}
     try{await fillGoals(request.data);}catch(e){throw new Error(`Goals: ${e.message}`);}
     try{await fillPenalties(request.data);}catch(e){throw new Error(`Penalties: ${e.message}`);}
+    try{fillStartingGoalies(request.data);}catch(e){throw new Error(`Starting goalies: ${e.message}`);}
     try{await fillGoalieShifts(request.data);}catch(e){throw new Error(`Goalie shifts: ${e.message}`);}
     try{fillShots(request.data);}catch(e){throw new Error(`Shots: ${e.message}`);}
     const scoring=heading('Scoring');if(scoring)scoring.scrollIntoView({behavior:'smooth',block:'start'});

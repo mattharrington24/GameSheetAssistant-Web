@@ -107,6 +107,18 @@ function buildWebFillPayload(){
     for(const stint of plan.stints)goalieShotRows.push({team:plan.team,goalie:`#${stint.goalie.number} ${stint.goalie.name}`,periods:opponentShots.map((value,i)=>i>=stint.start&&i<stint.end?value:0)});
   }
   const goalieShifts=plans.flatMap(plan=>plan.stints.map(stint=>({team:plan.team,period:shots.periods[stint.start],time:String(shots.periods[stint.start]).toUpperCase().startsWith('OT')?'8:00':'17:00',goalie:`#${stint.goalie.number} ${stint.goalie.name}`,basis:plan.basis})));
+  const startingGoalies=[game.away_team,game.home_team].flatMap(team=>{
+    const plan=plans.find(item=>item.team===team);
+    if(plan?.stints?.[0]){
+      const goalie=plan.stints[0].goalie;
+      return [{team,goalie:`#${goalie.number} ${goalie.name}`,basis:plan.basis}];
+    }
+    const workflowStep=(state.data.workflow||[]).find(step=>step.kind==='goalie-start'&&step.team===team&&/inferred starter/i.test(`${step.title} ${step.body}`));
+    const match=workflowStep?.body?.match(/#([^\n]+)/);
+    if(match)return [{team,goalie:`#${match[1].trim()}`,basis:'GameSheet Assistant workflow inference'}];
+    const played=playedGoaliesFor(team);
+    return played.length===1?[{team,goalie:`#${played[0].number} ${played[0].name}`,basis:'only goalie who played'}]:[];
+  });
   const warnings=[];
   if(awayPlayed.length!==1&&!plans.some(plan=>plan.team===game.away_team))warnings.push(`${game.away_team}: ${awayPlayed.length} goalies played; goalie order is ambiguous and must be reviewed manually.`);
   if(homePlayed.length!==1&&!plans.some(plan=>plan.team===game.home_team))warnings.push(`${game.home_team}: ${homePlayed.length} goalies played; goalie order is ambiguous and must be reviewed manually.`);
@@ -120,6 +132,7 @@ function buildWebFillPayload(){
     penalties:penalties.map(p=>{const length=(p.penalty.match(/(\d+)\s*(?:min|minute)/i)||[])[1]||'2';return {team:p.team,period:p.period,offender:p.player,served_by:p.player,length,code:p.penalty,time_off:p.remaining,time_start:p.remaining,time_on:penaltyRelease(p,goals,length)};}),
     goalie_shots:goalieShotRows,
     goalie_shifts:goalieShifts,
+    starting_goalies:startingGoalies,
     goalies:goalies.map(g=>({team:g.team,number:g.number,name:g.name,minutes:g.minutes,shots_against:g.shots_against,goals_against:g.goals_against,saves:g.saves})),
     warnings
   };

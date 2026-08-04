@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "GameSheet Assistant Web Helper",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Fills a reviewed GameSheet Edit Game form from GameSheet Assistant data.",
-  "permissions": ["activeTab", "clipboardRead"],
+  "permissions": ["activeTab", "clipboardRead", "scripting"],
   "host_permissions": ["https://gamesheet.app/*", "https://*.gamesheet.app/*"],
   "action": {"default_title": "Fill GameSheet", "default_popup": "popup.html"},
   "content_scripts": [{"matches": ["https://gamesheet.app/*", "https://*.gamesheet.app/*"], "js": ["content.js"], "run_at": "document_idle"}]

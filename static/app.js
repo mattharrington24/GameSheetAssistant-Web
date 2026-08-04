@@ -95,6 +95,13 @@ function penaltyRelease(penalty,goals,length){
   const earlyGoal=goals.find(goal=>goal.period===penalty.period&&goal.team!==penalty.team&&/power play/i.test(goal.strength||'')&&clockSeconds(goal.remaining)<off&&clockSeconds(goal.remaining)>scheduled);
   return earlyGoal?earlyGoal.remaining:clockText(scheduled);
 }
+const UNSPECIFIED_MINOR_TYPES=['Interference - Minor','Hooking - Minor','Tripping - Minor','Body Checking - Minor','Slashing - Minor','Holding - Minor'];
+function isUnspecifiedMinorPenalty(value){return /^minor(?:\s*\([^)]*\))?\s*$/i.test(String(value||'').trim());}
+function unspecifiedMinorFallback(penalty){
+  const key=[penalty.team,penalty.period,penalty.remaining,penalty.player].join('|');
+  let hash=0;for(const character of key)hash=(hash*31+character.charCodeAt(0))>>>0;
+  return UNSPECIFIED_MINOR_TYPES[hash%UNSPECIFIED_MINOR_TYPES.length];
+}
 function buildWebFillPayload(){
   const {game,shots,goals,penalties,goalies,source_url}=state.data;
   const periodCount=(shots.periods||[]).length;
@@ -147,13 +154,16 @@ function buildWebFillPayload(){
   if(awayPlayed.length!==1&&!plans.some(plan=>plan.team===game.away_team))warnings.push(`${game.away_team}: ${awayPlayed.length} goalies played; goalie order is ambiguous and must be reviewed manually.`);
   if(homePlayed.length!==1&&!plans.some(plan=>plan.team===game.home_team))warnings.push(`${game.home_team}: ${homePlayed.length} goalies played; goalie order is ambiguous and must be reviewed manually.`);
   for(const plan of plans)warnings.push(`${plan.team}: inferred ${plan.stints.map(stint=>`#${stint.goalie.number} ${stint.goalie.name} starts ${shots.periods[stint.start]}`).join('; ')} (${plan.basis}). Review before saving.`);
+  for(const penalty of penalties.filter(item=>isUnspecifiedMinorPenalty(item.penalty))){
+    warnings.push(`${penalty.team} ${penalty.period} ${penalty.remaining}: SportsEngine lists only “Minor”; ${unspecifiedMinorFallback(penalty).replace(/\s*-\s*Minor$/i,'')} was selected as a placeholder. Review before saving.`);
+  }
   if((shots.periods||[]).some((_,i)=>numericPeriodShots(shots.away,periodCount)[i]===null||numericPeriodShots(shots.home,periodCount)[i]===null))warnings.push('At least one period shot total is missing; review shots manually.');
   return {
     format:'gamesheet-assistant-web-fill',version:1,source_url,
     game:{away_team:game.away_team,home_team:game.home_team,away_score:Number(game.away_score),home_score:Number(game.home_score),date:game.date},
     periods:shots.periods,
     goals:goals.map(g=>{const defending=g.team===game.away_team?game.home_team:game.away_team;const plan=plans.find(item=>item.team===defending);const periodIndex=(shots.periods||[]).findIndex(period=>periodKey(period)===periodKey(g.period));const stint=plan?.stints.find(item=>periodIndex>=item.start&&periodIndex<item.end);return {team:g.team,period:g.period,time:g.remaining,player:g.scorer,assists:g.assists||[],strength:g.strength,goalie:stint?`#${stint.goalie.number} ${stint.goalie.name}`:''};}),
-    penalties:penalties.map(p=>{const length=(p.penalty.match(/(\d+)\s*(?:min|minute)/i)||[])[1]||'2';return {team:p.team,period:p.period,offender:p.player,served_by:p.player,length,code:p.penalty,time_off:p.remaining,time_start:p.remaining,time_on:penaltyRelease(p,goals,length)};}),
+    penalties:penalties.map(p=>{const length=(p.penalty.match(/(\d+)\s*(?:min|minute)/i)||[])[1]||'2';return {team:p.team,period:p.period,offender:p.player,served_by:p.player,length,code:isUnspecifiedMinorPenalty(p.penalty)?unspecifiedMinorFallback(p):p.penalty,time_off:p.remaining,time_start:p.remaining,time_on:penaltyRelease(p,goals,length),type_inferred:isUnspecifiedMinorPenalty(p.penalty)};}),
     goalie_shots:goalieShotRows,
     goalie_shifts:goalieShifts,
     starting_goalies:startingGoalies,

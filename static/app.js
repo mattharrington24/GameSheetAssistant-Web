@@ -78,7 +78,8 @@ function inferGoaliePlan(team,game,shots,goals,goalies,periods){
       const duration=clockSeconds(goalie.minutes);let covered=0,start=cursor;
       while(cursor<periods.length&&covered<duration){covered+=lengths[cursor];cursor++;}
       const expectedShots=opponentShots.slice(start,cursor).reduce((sum,value)=>sum+value,0);
-      const expectedGoals=goals.filter(goal=>goal.team===opponent&&periods.slice(start,cursor).map(String).includes(String(goal.period))).length;
+      const stintPeriods=periods.slice(start,cursor).map(periodKey);
+      const expectedGoals=goals.filter(goal=>goal.team===opponent&&stintPeriods.includes(periodKey(goal.period))).length;
       if(covered!==duration||goalieShotsFaced(goalie)!==expectedShots||Number(goalie.goals_against)!==expectedGoals){fits=false;break;}
       stints.push({goalie,start,end:cursor});
     }
@@ -88,12 +89,29 @@ function inferGoaliePlan(team,game,shots,goals,goalies,periods){
   const listed=valid.find(stints=>stints.every((stint,i)=>stint.goalie===played[i]));
   return listed?{team,opponent,stints:listed,basis:'validated SportsEngine goalie order'}:null;
 }
-function penaltyRelease(penalty,goals,length){
-  if(/penalty shot/i.test(penalty.penalty))return penalty.remaining;
-  const off=clockSeconds(penalty.remaining);if(off===null)return '';
-  const scheduled=Math.max(0,off-(Number(length)||2)*60);
-  const earlyGoal=goals.find(goal=>goal.period===penalty.period&&goal.team!==penalty.team&&/power play/i.test(goal.strength||'')&&clockSeconds(goal.remaining)<off&&clockSeconds(goal.remaining)>scheduled);
-  return earlyGoal?earlyGoal.remaining:clockText(scheduled);
+function penaltyRelease(penalty,goals,length,periods=[]){
+  if(/penalty shot/i.test(penalty.penalty))return {time:penalty.remaining,period:penalty.period,crosses_period:false};
+  const off=clockSeconds(penalty.remaining);if(off===null)return {time:'',period:penalty.period,crosses_period:false};
+  const duration=(Number(length)||2)*60;
+  const startIndex=periods.findIndex(period=>periodKey(period)===periodKey(penalty.period));
+  let releaseSeconds=off-duration;
+  let releasePeriod=penalty.period;
+  let crossesPeriod=false;
+  if(releaseSeconds<0&&startIndex>=0){
+    let remaining=-releaseSeconds;
+    for(let index=startIndex+1;index<periods.length;index++){
+      const periodLength=String(periods[index]).toUpperCase().startsWith('OT')?8*60:17*60;
+      crossesPeriod=true;
+      releasePeriod=periods[index];
+      if(remaining<=periodLength){releaseSeconds=periodLength-remaining;break;}
+      remaining-=periodLength;
+      releaseSeconds=0;
+    }
+  }
+  releaseSeconds=Math.max(0,releaseSeconds);
+  const mustServeFull=/\b(?:major|misconduct)\b/i.test(penalty.penalty)||duration>2*60;
+  const earlyGoal=!mustServeFull&&!crossesPeriod?goals.find(goal=>periodKey(goal.period)===periodKey(penalty.period)&&goal.team!==penalty.team&&/power play/i.test(goal.strength||'')&&clockSeconds(goal.remaining)<off&&clockSeconds(goal.remaining)>releaseSeconds):null;
+  return {time:earlyGoal?earlyGoal.remaining:clockText(releaseSeconds),period:earlyGoal?penalty.period:releasePeriod,crosses_period:crossesPeriod};
 }
 const UNSPECIFIED_MINOR_TYPES=['Interference - Minor','Hooking - Minor','Tripping - Minor','Body Checking - Minor','Slashing - Minor','Holding - Minor'];
 function isUnspecifiedMinorPenalty(value){return /^minor(?:\s*\([^)]*\))?\s*$/i.test(String(value||'').trim());}
@@ -101,6 +119,44 @@ function unspecifiedMinorFallback(penalty){
   const key=[penalty.team,penalty.period,penalty.remaining,penalty.player].join('|');
   let hash=0;for(const character of key)hash=(hash*31+character.charCodeAt(0))>>>0;
   return UNSPECIFIED_MINOR_TYPES[hash%UNSPECIFIED_MINOR_TYPES.length];
+}
+function penaltyLength(value){
+  const text=String(value||'');
+  if(/\bmisconduct\b/i.test(text))return '10';
+  if(/\bmajor\b/i.test(text))return '5';
+  const minutes=(text.match(/\b(\d+)\s*(?:min|minute)/i)||[])[1];
+  if(minutes)return minutes;
+  const clock=(text.match(/\((\d+):\d{1,2}\)/)||[])[1];
+  return clock&&Number(clock)>0?clock:'2';
+}
+function penaltyClassCode(value,kind){
+  const text=String(value||'').trim();
+  const type=(text.split(/\s+-\s+/,1)[0]||text).replace(/\s+(?:major|misconduct)\b.*$/i,'').trim();
+  return `${type||'Body Checking'} - ${kind}`;
+}
+function expandPenaltiesForWebFill(items){
+  const expanded=[];
+  for(const penalty of items){
+    const text=String(penalty.penalty||'');
+    if(/\bmajor\b/i.test(text)&&/\bmisconduct\b/i.test(text)){
+      expanded.push({...penalty,penalty:penaltyClassCode(text,'Major'),paired_major_misconduct:true});
+      expanded.push({...penalty,penalty:penaltyClassCode(text,'Misconduct'),paired_major_misconduct:true});
+    }else expanded.push({...penalty});
+  }
+  const groups=new Map();
+  for(const penalty of expanded){
+    const key=[penalty.team,periodKey(penalty.period),penalty.remaining,penalty.player].join('|');
+    if(!groups.has(key))groups.set(key,[]);groups.get(key).push(penalty);
+  }
+  for(const group of groups.values()){
+    const major=group.find(item=>/\bmajor\b/i.test(item.penalty));
+    const misconduct=group.find(item=>/\bmisconduct\b/i.test(item.penalty));
+    if(major&&misconduct){
+      for(const item of group)item.paired_major_misconduct=true;
+      if(/^\s*misconduct\b/i.test(misconduct.penalty))misconduct.penalty=penaltyClassCode(major.penalty,'Misconduct');
+    }
+  }
+  return expanded;
 }
 function buildWebFillPayload(){
   const {game,shots,goals,penalties,goalies,source_url}=state.data;
@@ -161,12 +217,25 @@ function buildWebFillPayload(){
     warnings.push(`${penalty.team} ${penalty.period} ${penalty.remaining}: SportsEngine lists only “Minor”; ${unspecifiedMinorFallback(penalty).replace(/\s*-\s*Minor$/i,'')} was selected as a placeholder. Review before saving.`);
   }
   if((shots.periods||[]).some((_,i)=>numericPeriodShots(shots.away,periodCount)[i]===null||numericPeriodShots(shots.home,periodCount)[i]===null))warnings.push('At least one period shot total is missing; review shots manually.');
+  const webPenalties=expandPenaltiesForWebFill(penalties);
+  for(const penalty of webPenalties.filter(item=>item.paired_major_misconduct&&/\bmajor\b/i.test(item.penalty))){
+    warnings.push(`${penalty.team} ${penalty.period} ${penalty.remaining}: paired major/misconduct exported as separate 5- and 10-minute penalties; the helper will select a teammate to serve the major.`);
+  }
+  const webPenaltyRows=webPenalties.map(p=>{
+    const length=penaltyLength(p.penalty);
+    const release=penaltyRelease(p,goals,length,shots.periods||[]);
+    const isPairedMajor=p.paired_major_misconduct&&/\bmajor\b/i.test(p.penalty);
+    return {team:p.team,period:p.period,offender:p.player,served_by:p.player,served_by_strategy:isPairedMajor?'deterministic_teammate':'offender',length,code:isUnspecifiedMinorPenalty(p.penalty)?unspecifiedMinorFallback(p):p.penalty,time_off:p.remaining,time_start:p.remaining,time_on:release.time,time_on_period:release.period,crosses_period:release.crosses_period,type_inferred:isUnspecifiedMinorPenalty(p.penalty)};
+  });
+  for(const penalty of webPenaltyRows.filter(item=>item.crosses_period)){
+    warnings.push(`${penalty.team} ${penalty.period} ${penalty.time_off}: ${penalty.length}-minute penalty releases at ${penalty.time_on} of ${penalty.time_on_period}. GameSheet uses one penalty row for the rollover; verify the saved result.`);
+  }
   return {
     format:'gamesheet-assistant-web-fill',version:1,source_url,
     game:{away_team:game.away_team,home_team:game.home_team,away_score:Number(game.away_score),home_score:Number(game.home_score),date:game.date},
     periods:shots.periods,
     goals:goals.map(g=>{const defending=g.team===game.away_team?game.home_team:game.away_team;const plan=plans.find(item=>item.team===defending);const periodIndex=(shots.periods||[]).findIndex(period=>periodKey(period)===periodKey(g.period));const stint=plan?.stints.find(item=>periodIndex>=item.start&&periodIndex<item.end);return {team:g.team,period:g.period,time:g.remaining,player:g.scorer,assists:g.assists||[],strength:g.strength,goalie:stint?`#${stint.goalie.number} ${stint.goalie.name}`:''};}),
-    penalties:penalties.map(p=>{const length=(p.penalty.match(/(\d+)\s*(?:min|minute)/i)||[])[1]||'2';return {team:p.team,period:p.period,offender:p.player,served_by:p.player,length,code:isUnspecifiedMinorPenalty(p.penalty)?unspecifiedMinorFallback(p):p.penalty,time_off:p.remaining,time_start:p.remaining,time_on:penaltyRelease(p,goals,length),type_inferred:isUnspecifiedMinorPenalty(p.penalty)};}),
+    penalties:webPenaltyRows,
     goalie_shots:goalieShotRows,
     goalie_shifts:goalieShifts,
     starting_goalies:startingGoalies,

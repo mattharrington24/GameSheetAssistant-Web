@@ -51,8 +51,33 @@ function setSelect(el,wanted,{optional=false}={}){
   if(!ranked[0]||ranked[0].score<35)throw new Error(`Could not match “${wanted}” in a GameSheet dropdown.`);
   el.value=ranked[0].o.value;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));
 }
+function penaltyKind(value){
+  const text=norm(value);
+  if(/\b(?:msc|misconduct)\b/.test(text))return 'misconduct';
+  if(/\b(?:maj|major)\b/.test(text))return 'major';
+  if(/\b(?:min|minor)\b/.test(text))return 'minor';
+  return '';
+}
+function setPenaltyCode(el,wanted,length){
+  const required=String(length)==='10'?'misconduct':String(length)==='5'?'major':String(length)==='2'?'minor':penaltyKind(wanted);
+  const ranked=[...el.options]
+    .filter(option=>!required||penaltyKind(option.textContent)===required)
+    .map(option=>({option,score:optionScore(option,wanted)}))
+    .sort((a,b)=>b.score-a.score);
+  if(!ranked[0]||ranked[0].score<35)throw new Error(`Could not match a ${required||'penalty'} code for “${wanted}” in the GameSheet dropdown.`);
+  el.value=ranked[0].option.value;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));
+}
+function deterministicTeammate(el,excluded,key){
+  const choices=[...el.options].filter(option=>option.value&&optionScore(option,excluded)<55&&/\b\d+\b/.test(norm(option.textContent)));
+  if(!choices.length)throw new Error(`Could not choose a teammate to serve the major assessed to ${excluded}.`);
+  let hash=0;for(const character of String(key||''))hash=(hash*31+character.charCodeAt(0))>>>0;
+  const choice=choices[hash%choices.length];
+  el.value=choice.value;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));
+  return choice.textContent.trim();
+}
 function periodValue(period){const match=String(period).match(/\d+/);return match?match[0]:String(period).toUpperCase().startsWith('OT')?'OT1':period;}
 function gameSheetTime(value){const match=String(value||'').match(/^(\d{1,2}):(\d{2})$/);return match?`${match[1].padStart(2,'0')}:${match[2]}`:value;}
+function isEmptyNetGoal(goal){return /\bempty\s+net\b/i.test(String(goal?.strength||''));}
 function splitTeams(items,game){return [items.filter(i=>i.team===game.away_team),items.filter(i=>i.team===game.home_team)];}
 function teamRows(sectionStart,sectionEnd,_game,side,label){
   const buttons=buttonsBetween(sectionStart,sectionEnd,label).sort((a,b)=>y(a)-y(b));
@@ -98,7 +123,8 @@ async function fillGoals(data){
       const opponents=(data.goalies||[]).filter(g=>g.team!==goal.team&&g.minutes!=='0:00');
       setSelect(anchor,goal.player);await pause(300);anchor=reacquireSelected(start,end,side,'ADD GOAL','scorerId',goal.player,'time');if(!anchor)throw new Error(`Could not reacquire the goal row for ${goal.player}.`);
       setSelect(rowField(anchor,'assistAId'),goal.assists[0]||'',{optional:true});setSelect(rowField(anchor,'assistBId'),goal.assists[1]||'',{optional:true});
-      if(goal.goalie)setSelect(rowField(anchor,'goalieId'),goal.goalie);
+      if(isEmptyNetGoal(goal))setSelect(rowField(anchor,'goalieId'),'Empty net');
+      else if(goal.goalie)setSelect(rowField(anchor,'goalieId'),goal.goalie);
       else if(opponents.length===1)setSelect(rowField(anchor,'goalieId'),`#${opponents[0].number} ${opponents[0].name}`);
       setInput(rowField(anchor,'time'),gameSheetTime(goal.time));setSelect(rowField(anchor,'period'),periodValue(goal.period));await pause(500);
     }
@@ -112,10 +138,13 @@ async function fillPenalties(data){
       const p=byTeam[side][i];await addRow(start,end,data.game,side,'ADD PENALTY',i);
       let anchor=namedRows(start,end,side,'ADD PENALTY','servedById').find(el=>!el.value)||namedRows(start,end,side,'ADD PENALTY','servedById')[i];if(!anchor)throw new Error('The newly created penalty row could not be found.');
       let row=anchor.closest('.row')||anchor.parentElement?.parentElement;let selects=[...(row?.querySelectorAll('select')||[])];if(selects.length<5)throw new Error('A penalty row did not contain its five dropdowns.');
-      setSelect(selects[1],p.offender);setSelect(anchor,p.served_by);await pause(300);anchor=reacquireSelected(start,end,side,'ADD PENALTY','servedById',p.served_by,'offTime');if(!anchor)throw new Error(`Could not reacquire the penalty row for ${p.served_by}.`);
+      setSelect(selects[1],p.offender);
+      const servedBy=p.served_by_strategy==='deterministic_teammate'?deterministicTeammate(anchor,p.offender,[p.team,p.period,p.time_off,p.offender].join('|')):p.served_by;
+      if(p.served_by_strategy!=='deterministic_teammate')setSelect(anchor,servedBy);
+      await pause(300);anchor=reacquireSelected(start,end,side,'ADD PENALTY','servedById',servedBy,'offTime');if(!anchor)throw new Error(`Could not reacquire the penalty row for ${servedBy}.`);
       setSelect(rowField(anchor,'length'),p.length);await pause(300);
-      anchor=reacquireSelected(start,end,side,'ADD PENALTY','servedById',p.served_by,'offTime');row=anchor.closest('.row')||anchor.parentElement?.parentElement;selects=[...(row?.querySelectorAll('select')||[])];
-      setSelect(rowField(anchor,'code'),p.code);setInput(rowField(anchor,'offTime'),gameSheetTime(p.time_off));setInput(rowField(anchor,'startTime'),gameSheetTime(p.time_start));setInput(rowField(anchor,'onTime'),gameSheetTime(p.time_on||p.time_off));setSelect(selects[0],periodValue(p.period));await pause(500);
+      anchor=reacquireSelected(start,end,side,'ADD PENALTY','servedById',servedBy,'offTime');row=anchor.closest('.row')||anchor.parentElement?.parentElement;selects=[...(row?.querySelectorAll('select')||[])];
+      setPenaltyCode(rowField(anchor,'code'),p.code,p.length);setInput(rowField(anchor,'offTime'),gameSheetTime(p.time_off));setInput(rowField(anchor,'startTime'),gameSheetTime(p.time_start));setInput(rowField(anchor,'onTime'),gameSheetTime(p.time_on||p.time_off));setSelect(selects[0],periodValue(p.period));await pause(500);
     }
   }
 }
@@ -139,7 +168,10 @@ async function fillGoalieShifts(data){
     setSelect(selects[1],shift.goalie);await pause(300);
     row=teamRows(start,end,null,side,'ADD GOALIE SHIFT').find(candidate=>candidate.controls.some(el=>el.tagName==='SELECT'&&selectedMatches(el,shift.goalie)))||teamRows(start,end,null,side,'ADD GOALIE SHIFT')[i];
     selects=row.controls.filter(el=>el.tagName==='SELECT');inputs=row.controls.filter(el=>el.tagName==='INPUT');
-    setInput(inputs[0],gameSheetTime(shift.time));setSelect(selects[0],periodValue(shift.period));await pause(500);
+    setSelect(selects[0],periodValue(shift.period));await pause(300);
+    row=teamRows(start,end,null,side,'ADD GOALIE SHIFT').find(candidate=>candidate.controls.some(el=>el.tagName==='SELECT'&&selectedMatches(el,shift.goalie)))||teamRows(start,end,null,side,'ADD GOALIE SHIFT')[i];
+    inputs=row.controls.filter(el=>el.tagName==='INPUT');if(!inputs.length)throw new Error(`The goalie-shift row for ${shift.team} lost its time field.`);
+    setInput(inputs[0],gameSheetTime(shift.time));await pause(500);
   }
 }
 function fillStartingGoalies(data){
@@ -171,12 +203,26 @@ function fillShots(data){
     target.periods.forEach((value,i)=>{if(value!==null&&row.controls[i])setInput(row.controls[i],value);});
   }
 }
+const TEAM_ALIAS_GROUPS=[
+  ['river cities','champlin park coon rapids'],
+  ['south central','waseca'],
+  ['burnsville','metro south'],
+  ['rochester century jm','rochester century john marshall'],
+  ['eveleth gilbert','rock ridge'],
+  ['armstrong cooper','robbinsdale armstrong cooper'],
+  ['westonka sw christian','mound westonka sw christian','westonka swc','mound westonka swc'],
+];
+function teamAliases(team){
+  const normalized=norm(team);
+  const group=TEAM_ALIAS_GROUPS.find(names=>names.includes(normalized));
+  return group||[normalized];
+}
 function inspect(data){
   if(!heading('Edit Game'))throw new Error('Open a GameSheet Edit Game page first.');
   const formValues=all('input,select').map(el=>el.tagName==='SELECT'?el.options?.[el.selectedIndex]?.textContent:el.value).join(' ');
   const body=norm(`${document.body.textContent} ${formValues}`);
   const teamOnPage=team=>{
-    const full=norm(team);if(body.includes(full))return true;
+    const full=norm(team);if(teamAliases(team).some(alias=>body.includes(alias)))return true;
     const meaningful=full.split(' ').filter(word=>word.length>=5);
     return meaningful.some(word=>new RegExp(`\\b${word}\\b`).test(body));
   };

@@ -278,7 +278,16 @@ def _infer_goalie_plans(game: dict, shots: dict, goals: list[dict], goalies: lis
                 valid.append(stints)
         selected = None
         basis = ""
-        if len(valid) == 1:
+        duration_order = tuple(sorted(played, key=lambda goalie: _seconds(goalie.get("minutes", "")), reverse=True))
+        durations_are_distinct = len({_seconds(goalie.get("minutes", "")) for goalie in duration_order}) == len(duration_order)
+        duration_matches = [
+            stints for stints in valid
+            if durations_are_distinct and tuple(stint["goalie"] for stint in stints) == duration_order
+        ]
+        if len(duration_matches) == 1:
+            selected = duration_matches[0]
+            basis = "full-period minutes and shots identify the starter and change"
+        elif len(valid) == 1:
             selected = valid[0]
             basis = "unique totals match"
         elif valid:

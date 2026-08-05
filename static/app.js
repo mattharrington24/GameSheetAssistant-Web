@@ -67,7 +67,6 @@ function goalieShotsFaced(goalie){
 function inferGoaliePlan(team,game,shots,goals,goalies,periods){
   const played=goalies.filter(g=>g.team===team&&clockSeconds(g.minutes)>0);
   if(played.length<2||played.length>periods.length)return null;
-  const opponent=team===game.away_team?game.home_team:game.away_team;
   const opponentShots=numericPeriodShots(team===game.away_team?shots.home:shots.away,periods.length);
   if(opponentShots.some(value=>value===null))return null;
   const lengths=periods.map(period=>String(period).toUpperCase().startsWith('OT')?8*60:17*60);
@@ -78,16 +77,18 @@ function inferGoaliePlan(team,game,shots,goals,goalies,periods){
       const duration=clockSeconds(goalie.minutes);let covered=0,start=cursor;
       while(cursor<periods.length&&covered<duration){covered+=lengths[cursor];cursor++;}
       const expectedShots=opponentShots.slice(start,cursor).reduce((sum,value)=>sum+value,0);
-      const stintPeriods=periods.slice(start,cursor).map(periodKey);
-      const expectedGoals=goals.filter(goal=>goal.team===opponent&&stintPeriods.includes(periodKey(goal.period))).length;
-      if(covered!==duration||goalieShotsFaced(goalie)!==expectedShots||Number(goalie.goals_against)!==expectedGoals){fits=false;break;}
+      if(covered!==duration||goalieShotsFaced(goalie)!==expectedShots){fits=false;break;}
       stints.push({goalie,start,end:cursor});
     }
     if(fits&&cursor===periods.length)valid.push(stints);
   }
-  if(valid.length===1)return {team,opponent,stints:valid[0],basis:'unique minutes, shots, and goals match'};
+  const durationOrder=played.slice().sort((a,b)=>clockSeconds(b.minutes)-clockSeconds(a.minutes));
+  const distinctDurations=new Set(durationOrder.map(goalie=>clockSeconds(goalie.minutes))).size===durationOrder.length;
+  const durationMatch=distinctDurations?valid.find(stints=>stints.every((stint,i)=>stint.goalie===durationOrder[i])):null;
+  if(durationMatch)return {team,stints:durationMatch,basis:'full-period minutes and shots identify the starter and change'};
+  if(valid.length===1)return {team,stints:valid[0],basis:'unique minutes and shots match'};
   const listed=valid.find(stints=>stints.every((stint,i)=>stint.goalie===played[i]));
-  return listed?{team,opponent,stints:listed,basis:'validated SportsEngine goalie order'}:null;
+  return listed?{team,stints:listed,basis:'validated SportsEngine goalie order'}:null;
 }
 function penaltyRelease(penalty,goals,length,periods=[]){
   if(/penalty shot/i.test(penalty.penalty))return {time:penalty.remaining,period:penalty.period,crosses_period:false};

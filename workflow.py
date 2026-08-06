@@ -234,8 +234,68 @@ def _resolved_period_shots(values: list, period_count: int) -> list[int] | None:
     return period_values if all(value is not None for value in period_values) else None
 
 
+def _partial_period_goalie_plan(played: list[dict], opponent_shots: list[int], period_lengths: list[int]) -> list[dict] | None:
+    """Infer a two-goalie, mid-period change from exact minutes and shot totals.
+
+    SportsEngine reports total goalie minutes but not the change clock. When the
+    longer-serving goalie plus the replacement exactly cover the game, the
+    starter's duration determines the change clock. We accept the inference only
+    when the starter faced every opponent shot through the change period and the
+    replacement faced every shot in the periods after it.
+    """
+    if len(played) != 2:
+        return None
+    total_length = sum(period_lengths)
+    ordered = sorted(played, key=lambda goalie: _seconds(goalie.get("minutes", "")), reverse=True)
+    durations = [_seconds(goalie.get("minutes", "")) for goalie in ordered]
+    if durations[0] == durations[1] or sum(durations) != total_length:
+        return None
+
+    starter_elapsed = durations[0]
+    change_period = 0
+    elapsed_in_period = starter_elapsed
+    while change_period < len(period_lengths) and elapsed_in_period >= period_lengths[change_period]:
+        elapsed_in_period -= period_lengths[change_period]
+        change_period += 1
+    # Exact period boundaries belong to the full-period inference above.
+    if change_period >= len(period_lengths) or elapsed_in_period == 0:
+        return None
+
+    change_remaining = period_lengths[change_period] - elapsed_in_period
+    starter_expected = sum(opponent_shots[:change_period + 1])
+    replacement_expected = sum(opponent_shots[change_period + 1:])
+    if (_goalie_shots_faced(ordered[0]) != starter_expected
+            or _goalie_shots_faced(ordered[1]) != replacement_expected):
+        return None
+
+    return [
+        {
+            "goalie": ordered[0],
+            "start": 0,
+            "end": change_period + 1,
+            "start_time": _format_clock(period_lengths[0]),
+            "end_time": _format_clock(change_remaining),
+            "change_period": change_period,
+            "shots_faced": starter_expected,
+            "matched_shots": starter_expected,
+            "partial_end": True,
+        },
+        {
+            "goalie": ordered[1],
+            "start": change_period,
+            "end": len(period_lengths),
+            "start_time": _format_clock(change_remaining),
+            "end_time": "0:00",
+            "change_period": change_period,
+            "shots_faced": replacement_expected,
+            "matched_shots": replacement_expected,
+            "partial_start": True,
+        },
+    ]
+
+
 def _infer_goalie_plans(game: dict, shots: dict, goals: list[dict], goalies: list[dict], periods: list[str]) -> dict[str, dict]:
-    """Infer full-period goalie stints when one ordering fits minutes and shots."""
+    """Infer full- or partial-period goalie stints from minutes and shots."""
     plans = {}
     for team in (game["away_team"], game["home_team"]):
         played = [g for g in goalies if g.get("team") == team and _seconds(g.get("minutes", "")) not in (0, 10**9)]
@@ -278,16 +338,7 @@ def _infer_goalie_plans(game: dict, shots: dict, goals: list[dict], goalies: lis
                 valid.append(stints)
         selected = None
         basis = ""
-        duration_order = tuple(sorted(played, key=lambda goalie: _seconds(goalie.get("minutes", "")), reverse=True))
-        durations_are_distinct = len({_seconds(goalie.get("minutes", "")) for goalie in duration_order}) == len(duration_order)
-        duration_matches = [
-            stints for stints in valid
-            if durations_are_distinct and tuple(stint["goalie"] for stint in stints) == duration_order
-        ]
-        if len(duration_matches) == 1:
-            selected = duration_matches[0]
-            basis = "full-period minutes and shots identify the starter and change"
-        elif len(valid) == 1:
+        if len(valid) == 1:
             selected = valid[0]
             basis = "unique totals match"
         elif valid:
@@ -303,6 +354,10 @@ def _infer_goalie_plans(game: dict, shots: dict, goals: list[dict], goalies: lis
             if len(listed_matches) == 1:
                 selected = listed_matches[0]
                 basis = "validated SportsEngine goalie order"
+        if not selected:
+            selected = _partial_period_goalie_plan(played, opponent_shots, period_lengths)
+            if selected:
+                basis = "partial-period minutes and shots identify the starter and exact change clock"
         if selected:
             plans[team] = {
                 "stints": selected,
@@ -325,19 +380,44 @@ def _goalie_steps(game: dict, goalies: list[dict], goalie_plans: dict[str, dict]
             starter = starter_stint["goalie"]
             covered_periods = [goalie_plans[team]["periods"][i] for i in range(starter_stint["start"], starter_stint["end"])]
             period_text = " and ".join(_period_label(period) for period in covered_periods)
-            changes = "\n".join(
-                f"Goalie change: #{stint['goalie']['number']} {stint['goalie']['name']} starts {_period_label(stint_period)}."
-                for stint in stints[1:]
-                for stint_period in [goalie_plans[team]["periods"][stint["start"]]]
-            )
+            change_lines = []
+            for stint in stints[1:]:
+                stint_period = goalie_plans[team]["periods"][stint["start"]]
+                if stint.get("partial_start"):
+                    change_lines.append(
+                        f"Goalie change: #{stint['goalie']['number']} {stint['goalie']['name']} enters "
+                        f"{_period_label(stint_period)} at {stint['start_time']} remaining."
+                    )
+                else:
+                    change_lines.append(
+                        f"Goalie change: #{stint['goalie']['number']} {stint['goalie']['name']} "
+                        f"starts {_period_label(stint_period)}."
+                    )
+            changes = "\n".join(change_lines)
+            if starter_stint.get("partial_end"):
+                change_period = goalie_plans[team]["periods"][starter_stint["change_period"]]
+                full_periods = [_period_label(value) for value in goalie_plans[team]["periods"][:starter_stint["change_period"]]]
+                elapsed_in_change = _period_length(change_period) - _seconds(starter_stint["end_time"])
+                coverage_text = (
+                    (" and ".join(full_periods) + " plus ") if full_periods else ""
+                ) + f"{_format_clock(elapsed_in_change)} elapsed in {_period_label(change_period)}"
+                why = (
+                    f"Why: {starter['minutes']} covers {coverage_text}, placing the change at "
+                    f"{starter_stint['end_time']} remaining. {starter_stint['shots_faced']} shots faced "
+                    f"matches all {plan['opponent']} shots through that change period."
+                )
+            else:
+                why = (
+                    f"Why: {starter['minutes']} exactly covers {period_text}, and "
+                    f"{starter_stint['shots_faced']} shots faced (saves + goals allowed) matches "
+                    f"{plan['opponent']}'s {starter_stint['matched_shots']} shots in those periods."
+                )
             body = (
                 "INFERRED STARTER — VERIFIED BY MINUTES AND SHOTS\n\n"
                 f"#{starter['number']} {starter['name']}\n"
                 f"Played {starter['minutes']} · {starter_stint['shots_faced']} shots faced · "
                 f"{starter.get('goals_against', '—')} GA\n\n"
-                f"Why: {starter['minutes']} exactly covers {period_text}, and "
-                f"{starter_stint['shots_faced']} shots faced (saves + goals allowed) matches "
-                f"{plan['opponent']}'s {starter_stint['matched_shots']} shots in those periods.\n"
+                f"{why}\n"
                 f"Inference basis: {plan['basis']}.\n\n"
                 f"{changes}"
             )
@@ -378,13 +458,21 @@ def _goalie_change_steps(goalie_plans: dict[str, dict], period: str) -> list[dic
             if not _same_period(start_period, period):
                 continue
             goalie = stint["goalie"]
+            start_time = stint.get("start_time", _format_clock(_period_length(period)))
+            at_period_start = start_time == _format_clock(_period_length(period))
+            instruction = (
+                f"⚠ CHANGE GOALIE BEFORE STARTING {_period_label(period).upper()}\n\n"
+                if at_period_start else
+                f"⚠ CHANGE GOALIE AT {start_time} REMAINING IN {_period_label(period).upper()}\n\n"
+            )
             steps.append({
-                "title": f"GOALIE CHANGE — {_period_label(period).upper()}",
+                "title": f"GOALIE CHANGE — {_period_label(period).upper()}" + ("" if at_period_start else f" — {start_time}"),
                 "kind": "goalie-change",
                 "period": period,
                 "team": team,
                 "body": (
-                    f"⚠ CHANGE GOALIE BEFORE STARTING {_period_label(period).upper()}\n\n"
+                    instruction
+                    +
                     f"Select #{goalie['number']} {goalie['name']} for {team}.\n"
                     f"Inferred from {goalie['minutes']} played and {stint['shots_faced']} shots faced "
                     "(saves + goals allowed), matched to the opponent's period shots."

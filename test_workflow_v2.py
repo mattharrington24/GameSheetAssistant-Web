@@ -206,6 +206,30 @@ def test_ambiguous_multiple_goalies_still_require_confirmation():
     assert not any(s["kind"]=="goalie-change" for s in steps)
 
 
+def test_warroad_partial_second_period_goalie_change_is_inferred():
+    game={"away_team":"Crookston","away_score":"0","home_team":"Warroad","home_score":"14","date":"Today","venue":"Arena"}
+    shots={
+        "periods":["1st","2nd","3rd"],
+        "away_team":"Crookston","away":["2","2","0","4"],
+        "home_team":"Warroad","home":["18","17","14","49"],
+    }
+    goalies=[
+        {"team":"Warroad","number":"33","name":"Kendra Nordick","minutes":"25:39","shots_against":"4","goals_against":"0","saves":"4"},
+        {"team":"Warroad","number":"35","name":"CJ Lancot","minutes":"25:21","shots_against":"0","goals_against":"0","saves":"0"},
+    ]
+    steps=build_entry_steps(game,shots,[],[],goalies)
+    starter=next(s for s in steps if s["kind"]=="goalie-start" and s["team"]=="Warroad")
+    assert starter["title"]=="Starting Goalie — Inferred"
+    assert "#33 Kendra Nordick" in starter["body"]
+    assert "8:21 remaining" in starter["body"]
+    assert "4 shots faced matches all Crookston shots through that change period" in starter["body"]
+    change=next(s for s in steps if s["kind"]=="goalie-change")
+    assert change["period"]=="2nd"
+    assert "8:21" in change["title"]
+    assert "CHANGE GOALIE AT 8:21 REMAINING IN 2ND PERIOD" in change["body"]
+    assert "#35 CJ Lancot" in change["body"]
+
+
 def test_hannah_fritz_starter_is_inferred_from_saves_plus_goals():
     game={"away_team":"Irondale/St. Anthony","away_score":"0","home_team":"Opponent","home_score":"0","date":"Today","venue":"Arena"}
     shots={

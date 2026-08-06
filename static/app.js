@@ -82,13 +82,31 @@ function inferGoaliePlan(team,game,shots,goals,goalies,periods){
     }
     if(fits&&cursor===periods.length)valid.push(stints);
   }
-  const durationOrder=played.slice().sort((a,b)=>clockSeconds(b.minutes)-clockSeconds(a.minutes));
-  const distinctDurations=new Set(durationOrder.map(goalie=>clockSeconds(goalie.minutes))).size===durationOrder.length;
-  const durationMatch=distinctDurations?valid.find(stints=>stints.every((stint,i)=>stint.goalie===durationOrder[i])):null;
-  if(durationMatch)return {team,stints:durationMatch,basis:'full-period minutes and shots identify the starter and change'};
   if(valid.length===1)return {team,stints:valid[0],basis:'unique minutes and shots match'};
   const listed=valid.find(stints=>stints.every((stint,i)=>stint.goalie===played[i]));
-  return listed?{team,stints:listed,basis:'validated SportsEngine goalie order'}:null;
+  if(listed)return {team,stints:listed,basis:'validated SportsEngine goalie order'};
+
+  if(played.length===2){
+    const ordered=played.slice().sort((a,b)=>clockSeconds(b.minutes)-clockSeconds(a.minutes));
+    const durations=ordered.map(goalie=>clockSeconds(goalie.minutes));
+    const totalLength=lengths.reduce((sum,value)=>sum+value,0);
+    if(durations[0]!==durations[1]&&durations[0]+durations[1]===totalLength){
+      let changePeriod=0,elapsedInPeriod=durations[0];
+      while(changePeriod<lengths.length&&elapsedInPeriod>=lengths[changePeriod]){elapsedInPeriod-=lengths[changePeriod];changePeriod++;}
+      if(changePeriod<lengths.length&&elapsedInPeriod>0){
+        const changeRemaining=lengths[changePeriod]-elapsedInPeriod;
+        const starterShots=opponentShots.slice(0,changePeriod+1).reduce((sum,value)=>sum+value,0);
+        const replacementShots=opponentShots.slice(changePeriod+1).reduce((sum,value)=>sum+value,0);
+        if(goalieShotsFaced(ordered[0])===starterShots&&goalieShotsFaced(ordered[1])===replacementShots){
+          return {team,basis:'partial-period minutes and shots identify the starter and exact change clock',stints:[
+            {goalie:ordered[0],start:0,end:changePeriod+1,start_time:clockText(lengths[0]),end_time:clockText(changeRemaining),change_period:changePeriod,partial_end:true},
+            {goalie:ordered[1],start:changePeriod,end:periods.length,start_time:clockText(changeRemaining),end_time:'0:00',change_period:changePeriod,partial_start:true}
+          ]};
+        }
+      }
+    }
+  }
+  return null;
 }
 function penaltyRelease(penalty,goals,length,periods=[]){
   if(/penalty shot/i.test(penalty.penalty))return {time:penalty.remaining,period:penalty.period,crosses_period:false};
@@ -170,9 +188,12 @@ function buildWebFillPayload(){
   if(homePlayed.length===1)goalieShotRows.push({team:game.home_team,goalie:`#${homePlayed[0].number} ${homePlayed[0].name}`,periods:numericPeriodShots(shots.away,periodCount)});
   for(const plan of plans){
     const opponentShots=numericPeriodShots(plan.team===game.away_team?shots.home:shots.away,periodCount);
-    for(const stint of plan.stints)goalieShotRows.push({team:plan.team,goalie:`#${stint.goalie.number} ${stint.goalie.name}`,periods:opponentShots.map((value,i)=>i>=stint.start&&i<stint.end?value:0)});
+    for(const stint of plan.stints)goalieShotRows.push({team:plan.team,goalie:`#${stint.goalie.number} ${stint.goalie.name}`,periods:opponentShots.map((value,i)=>{
+      if(stint.partial_start)return i>stint.start&&i<stint.end?value:0;
+      return i>=stint.start&&i<stint.end?value:0;
+    })});
   }
-  const goalieShifts=plans.flatMap(plan=>plan.stints.map(stint=>({team:plan.team,period:shots.periods[stint.start],time:String(shots.periods[stint.start]).toUpperCase().startsWith('OT')?'8:00':'17:00',goalie:`#${stint.goalie.number} ${stint.goalie.name}`,basis:plan.basis})));
+  const goalieShifts=plans.flatMap(plan=>plan.stints.map(stint=>({team:plan.team,period:shots.periods[stint.start],time:stint.start_time||(String(shots.periods[stint.start]).toUpperCase().startsWith('OT')?'8:00':'17:00'),goalie:`#${stint.goalie.number} ${stint.goalie.name}`,basis:plan.basis})));
   for(const [team,played] of [[game.away_team,awayPlayed],[game.home_team,homePlayed]]){
     if(played.length===1&&!plans.some(plan=>plan.team===team))goalieShifts.push({team,period:shots.periods[0]||'1',time:'17:00',goalie:`#${played[0].number} ${played[0].name}`,basis:'only goalie who played'});
   }
@@ -180,7 +201,8 @@ function buildWebFillPayload(){
     const defending=goal.team===game.away_team?game.home_team:game.away_team;
     const periodIndex=(shots.periods||[]).findIndex(period=>periodKey(period)===periodKey(goal.period));
     const plan=plans.find(item=>item.team===defending);
-    const stint=plan?.stints.find(item=>periodIndex>=item.start&&periodIndex<item.end);
+    const goalClock=clockSeconds(goal.remaining);
+    const stint=plan?.stints.find(item=>periodIndex>=item.start&&periodIndex<item.end&&(!item.partial_end||periodIndex!==item.change_period||goalClock>clockSeconds(item.end_time))&&(!item.partial_start||periodIndex!==item.change_period||goalClock<=clockSeconds(item.start_time)));
     const played=defending===game.away_team?awayPlayed:homePlayed;
     const goalie=stint?.goalie||(played.length===1?played[0]:null);
     if(!goalie)continue;
@@ -236,7 +258,7 @@ function buildWebFillPayload(){
     format:'gamesheet-assistant-web-fill',version:1,source_url,
     game:{away_team:game.away_team,home_team:game.home_team,away_score:Number(game.away_score),home_score:Number(game.home_score),date:game.date},
     periods:shots.periods,
-    goals:goals.map(g=>{const defending=g.team===game.away_team?game.home_team:game.away_team;const plan=plans.find(item=>item.team===defending);const periodIndex=(shots.periods||[]).findIndex(period=>periodKey(period)===periodKey(g.period));const stint=plan?.stints.find(item=>periodIndex>=item.start&&periodIndex<item.end);return {team:g.team,period:g.period,time:g.remaining,player:g.scorer,assists:g.assists||[],strength:g.strength,goalie:stint?`#${stint.goalie.number} ${stint.goalie.name}`:''};}),
+    goals:goals.map(g=>{const defending=g.team===game.away_team?game.home_team:game.away_team;const plan=plans.find(item=>item.team===defending);const periodIndex=(shots.periods||[]).findIndex(period=>periodKey(period)===periodKey(g.period));const goalClock=clockSeconds(g.remaining);const stint=plan?.stints.find(item=>periodIndex>=item.start&&periodIndex<item.end&&(!item.partial_end||periodIndex!==item.change_period||goalClock>clockSeconds(item.end_time))&&(!item.partial_start||periodIndex!==item.change_period||goalClock<=clockSeconds(item.start_time)));return {team:g.team,period:g.period,time:g.remaining,player:g.scorer,assists:g.assists||[],strength:g.strength,goalie:stint?`#${stint.goalie.number} ${stint.goalie.name}`:''};}),
     penalties:webPenaltyRows,
     goalie_shots:goalieShotRows,
     goalie_shifts:goalieShifts,

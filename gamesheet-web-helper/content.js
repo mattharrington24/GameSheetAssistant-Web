@@ -75,6 +75,26 @@ function deterministicTeammate(el,excluded,key){
   el.value=choice.value;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));
   return choice.textContent.trim();
 }
+function isMissingPlayer(value){return /^(?:team\s*\/?\s*bench|team|bench|unknown|not provided|n\/?a)$/i.test(String(value||'').trim())||/roster[-_ ]player|::/.test(String(value||''));}
+function selectDeterministicRosterPlayer(el,excluded,key){return deterministicTeammate(el,excluded,key);}
+function setPenaltyOffender(el,penalty,key){
+  const wanted=penalty.offender;
+  if(!isMissingPlayer(wanted)){
+    try{setSelect(el,wanted);return el.options[el.selectedIndex]?.textContent?.trim()||wanted;}catch(error){
+      if(!/Could not match/.test(String(error?.message||error)))throw error;
+    }
+  }
+  const benchWanted=/^(?:team\s*\/?\s*bench|team|bench)$/i.test(String(wanted||'').trim());
+  if(benchWanted){
+    const team=norm(penalty.team);
+    const option=[...el.options].find(item=>{
+      const text=norm(item.textContent);
+      return text===team||/^(?:team bench|bench|team|bench minor)$/.test(text);
+    });
+    if(option){el.value=option.value;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));return option.textContent.trim();}
+  }
+  return selectDeterministicRosterPlayer(el,wanted,key);
+}
 function periodValue(period){const match=String(period).match(/\d+/);return match?match[0]:String(period).toUpperCase().startsWith('OT')?'OT1':period;}
 function gameSheetTime(value){const match=String(value||'').match(/^(\d{1,2}):(\d{2})$/);return match?`${match[1].padStart(2,'0')}:${match[2]}`:value;}
 function isEmptyNetGoal(goal){return /\bempty\s+net\b/i.test(String(goal?.strength||''));}
@@ -138,9 +158,17 @@ async function fillPenalties(data){
       const p=byTeam[side][i];await addRow(start,end,data.game,side,'ADD PENALTY',i);
       let anchor=namedRows(start,end,side,'ADD PENALTY','servedById').find(el=>!el.value)||namedRows(start,end,side,'ADD PENALTY','servedById')[i];if(!anchor)throw new Error('The newly created penalty row could not be found.');
       let row=anchor.closest('.row')||anchor.parentElement?.parentElement;let selects=[...(row?.querySelectorAll('select')||[])];if(selects.length<5)throw new Error('A penalty row did not contain its five dropdowns.');
-      setSelect(selects[1],p.offender);
-      const servedBy=p.served_by_strategy==='deterministic_teammate'?deterministicTeammate(anchor,p.offender,[p.team,p.period,p.time_off,p.offender].join('|')):p.served_by;
-      if(p.served_by_strategy!=='deterministic_teammate')setSelect(anchor,servedBy);
+      const eventKey=[p.team,p.period,p.time_off,p.offender].join('|');
+      setPenaltyOffender(selects[1],p,eventKey);
+      const useRosterFallback=p.served_by_strategy==='deterministic_teammate'||isMissingPlayer(p.served_by);
+      let servedBy;
+      if(useRosterFallback)servedBy=selectDeterministicRosterPlayer(anchor,p.offender,eventKey);
+      else{
+        try{setSelect(anchor,p.served_by);servedBy=p.served_by;}catch(error){
+          if(!/Could not match/.test(String(error?.message||error)))throw error;
+          servedBy=selectDeterministicRosterPlayer(anchor,p.offender,eventKey);
+        }
+      }
       await pause(300);anchor=reacquireSelected(start,end,side,'ADD PENALTY','servedById',servedBy,'offTime');if(!anchor)throw new Error(`Could not reacquire the penalty row for ${servedBy}.`);
       setSelect(rowField(anchor,'length'),p.length);await pause(300);
       anchor=reacquireSelected(start,end,side,'ADD PENALTY','servedById',servedBy,'offTime');row=anchor.closest('.row')||anchor.parentElement?.parentElement;selects=[...(row?.querySelectorAll('select')||[])];

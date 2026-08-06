@@ -249,7 +249,8 @@ function buildWebFillPayload(){
     const length=penaltyLength(p.penalty);
     const release=penaltyRelease(p,goals,length,shots.periods||[]);
     const isPairedMajor=p.paired_major_misconduct&&/\bmajor\b/i.test(p.penalty);
-    return {team:p.team,period:p.period,offender:p.player,served_by:p.player,served_by_strategy:isPairedMajor?'deterministic_teammate':'offender',length,code:isUnspecifiedMinorPenalty(p.penalty)?unspecifiedMinorFallback(p):p.penalty,time_off:p.remaining,time_start:p.remaining,time_on:release.time,time_on_period:release.period,crosses_period:release.crosses_period,type_inferred:isUnspecifiedMinorPenalty(p.penalty)};
+    const isBenchPenalty=/^(?:team\s*\/\s*bench|team|bench)$/i.test(String(p.player||'').trim());
+    return {team:p.team,period:p.period,offender:p.player,served_by:p.player,served_by_strategy:isPairedMajor||isBenchPenalty?'deterministic_teammate':'offender',offender_strategy:isBenchPenalty?'team_or_roster_fallback':'player_or_roster_fallback',length,code:isUnspecifiedMinorPenalty(p.penalty)?unspecifiedMinorFallback(p):p.penalty,time_off:p.remaining,time_start:p.remaining,time_on:release.time,time_on_period:release.period,crosses_period:release.crosses_period,type_inferred:isUnspecifiedMinorPenalty(p.penalty)};
   });
   for(const penalty of webPenaltyRows.filter(item=>item.crosses_period)){
     warnings.push(`${penalty.team} ${penalty.period} ${penalty.time_off}: ${penalty.length}-minute penalty releases at ${penalty.time_on} of ${penalty.time_on_period}. GameSheet uses one penalty row for the rollover; verify the saved result.`);

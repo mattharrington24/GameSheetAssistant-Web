@@ -1,5 +1,6 @@
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const norm=value=>String(value||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+const teamNorm=value=>norm(value).split(' ').filter(word=>word!=='area').join(' ');
 const visible=el=>!!(el&&el.getClientRects().length);
 const textIs=(el,text)=>norm(el.textContent)===norm(text);
 const all=(selector)=>[...document.querySelectorAll(selector)].filter(visible);
@@ -241,8 +242,8 @@ const TEAM_ALIAS_GROUPS=[
   ['westonka sw christian','mound westonka sw christian','westonka swc','mound westonka swc'],
 ];
 function teamAliases(team){
-  const normalized=norm(team);
-  const group=TEAM_ALIAS_GROUPS.find(names=>names.includes(normalized));
+  const normalized=teamNorm(team);
+  const group=TEAM_ALIAS_GROUPS.find(names=>names.map(teamNorm).includes(normalized));
   return group||[normalized];
 }
 function inspect(data){
@@ -250,7 +251,7 @@ function inspect(data){
   const formValues=all('input,select').map(el=>el.tagName==='SELECT'?el.options?.[el.selectedIndex]?.textContent:el.value).join(' ');
   const body=norm(`${document.body.textContent} ${formValues}`);
   const teamOnPage=team=>{
-    const full=norm(team);if(teamAliases(team).some(alias=>body.includes(alias)))return true;
+    const full=teamNorm(team);if(teamAliases(team).some(alias=>body.includes(alias)))return true;
     const meaningful=full.split(' ').filter(word=>word.length>=5);
     return meaningful.some(word=>new RegExp(`\\b${word}\\b`).test(body));
   };

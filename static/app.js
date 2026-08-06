@@ -236,7 +236,7 @@ function buildWebFillPayload(){
   for(const plan of plans)warnings.push(`${plan.team}: inferred ${plan.stints.map(stint=>`#${stint.goalie.number} ${stint.goalie.name} starts ${shots.periods[stint.start]}`).join('; ')} (${plan.basis}). Review before saving.`);
   const hasOvertime=(shots.periods||[]).some(period=>String(period).toUpperCase().startsWith('OT'));
   const isOvertimeTie=hasOvertime&&Number(game.away_score)===Number(game.home_score);
-  if(isOvertimeTie)warnings.push('This game ended in a scoreless overtime tie. GameSheet Assistant corrected full-game goalie totals to 59:00, but GameSheet’s web editor still calculates goalie shifts through 0:00 of the 3rd period. Do not add a duplicate OT goalie shift; GameSheet may continue to display 51:00.');
+  if(isOvertimeTie)warnings.push(`This game ended in a ${game.away_score}–${game.home_score} overtime tie; the overtime period was scoreless. GameSheet Assistant corrected full-game goalie totals to 59:00, but GameSheet’s web editor still calculates goalie shifts through 0:00 of the 3rd period. Do not add a duplicate OT goalie shift; GameSheet may continue to display 51:00.`);
   for(const penalty of penalties.filter(item=>isUnspecifiedMinorPenalty(item.penalty))){
     warnings.push(`${penalty.team} ${penalty.period} ${penalty.remaining}: SportsEngine lists only “Minor”; ${unspecifiedMinorFallback(penalty).replace(/\s*-\s*Minor$/i,'')} was selected as a placeholder. Review before saving.`);
   }

@@ -88,6 +88,48 @@ def _normalize_overtime_goalie_minutes(
 TIME_RE = re.compile(r"^\d{1,2}:\d{2}$")
 PERIOD_RE = re.compile(r"^(1st|2nd|3rd|OT\d*)$", re.IGNORECASE)
 SCORE_RE = re.compile(r"^\d+$")
+BROKEN_PLAYER_RE = re.compile(r"roster-player-|::\[", re.IGNORECASE)
+
+
+def _broken_player(value: str) -> bool:
+    """Return True for an unresolved SportsEngine roster template."""
+    return not str(value).strip() or bool(BROKEN_PLAYER_RE.search(str(value)))
+
+
+def _player_number(value: str) -> str:
+    match = re.search(r"#\d+", str(value))
+    return match.group(0) if match else ""
+
+
+def _replace_broken_goal_scorers(goals: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Replace broken scorer templates with a stable eligible teammate."""
+    repaired = [dict(goal) for goal in goals]
+    known_by_team: dict[str, list[str]] = {}
+
+    for goal in repaired:
+        team = str(goal.get("team", ""))
+        candidates = known_by_team.setdefault(team, [])
+        for player in [goal.get("scorer", ""), *goal.get("assists", [])]:
+            player = str(player).strip()
+            if not _broken_player(player) and _player_number(player) and player not in candidates:
+                candidates.append(player)
+
+    for goal in repaired:
+        original = str(goal.get("scorer", "")).strip()
+        if not _broken_player(original):
+            continue
+        assist_numbers = {_player_number(player) for player in goal.get("assists", [])}
+        team_candidates = known_by_team.get(str(goal.get("team", "")), [])
+        candidates = [player for player in team_candidates if _player_number(player) not in assist_numbers] or team_candidates
+        if not candidates:
+            continue
+        seed = f"{goal.get('team', '')}|{goal.get('period', '')}|{goal.get('elapsed', '')}"
+        chosen = candidates[sum(ord(character) for character in seed) % len(candidates)]
+        goal["scorer"] = chosen
+        goal["scorer_inferred"] = True
+        goal["scorer_source"] = original
+
+    return repaired
 
 
 def html_to_lines(html: str) -> list[str]:
@@ -246,7 +288,7 @@ class SportsEngineParser:
                     index = next_index
                     continue
             index += 1
-        return goals
+        return _replace_broken_goal_scorers(goals)
 
     def _penalty_section(self) -> list[str]:
         start = self.lines.index("Penalty Summary")
@@ -282,15 +324,22 @@ class SportsEngineParser:
                     if cursor >= len(lines):
                         index += 1
                         continue
-                    penalties.append({
-                        "period": period,
-                        "elapsed": line,
-                        "remaining": convert_to_time_remaining(line, self._period_for_converter(period)),
-                        "team": team,
-                        "player": f"{player_number} {player_name}".strip(),
-                        "penalty": lines[cursor],
-                    })
-                    index = cursor + 1
+                    detail_start = cursor
+                    while cursor < len(lines) and not TIME_RE.fullmatch(lines[cursor]) and not self._is_period(lines[cursor]):
+                        detail = lines[cursor]
+                        if re.search(r"\b(?:minor|major|misconduct)\b", detail, re.IGNORECASE):
+                            penalties.append({
+                                "period": period,
+                                "elapsed": line,
+                                "remaining": convert_to_time_remaining(line, self._period_for_converter(period)),
+                                "team": team,
+                                "player": f"{player_number} {player_name}".strip(),
+                                "penalty": detail,
+                            })
+                        cursor += 1
+                    if cursor == detail_start:
+                        cursor += 1
+                    index = cursor
                     continue
             index += 1
         return penalties

@@ -208,6 +208,7 @@ function buildWebFillPayload(){
     return played.length===1?[{team,goalie:`#${played[0].number} ${played[0].name}`,basis:'only goalie who played'}]:[];
   });
   const warnings=[];
+  for(const goal of goals.filter(item=>item.scorer_inferred))warnings.push(`${goal.team} ${goal.period} ${goal.remaining}: SportsEngine did not provide a valid goal scorer; ${goal.scorer} was assigned as a placeholder. Review if another source becomes available.`);
   if(awayPlayed.length!==1&&!plans.some(plan=>plan.team===game.away_team))warnings.push(`${game.away_team}: ${awayPlayed.length} goalies played; goalie order is ambiguous and must be reviewed manually.`);
   if(homePlayed.length!==1&&!plans.some(plan=>plan.team===game.home_team))warnings.push(`${game.home_team}: ${homePlayed.length} goalies played; goalie order is ambiguous and must be reviewed manually.`);
   for(const plan of plans)warnings.push(`${plan.team}: inferred ${plan.stints.map(stint=>`#${stint.goalie.number} ${stint.goalie.name} starts ${shots.periods[stint.start]}`).join('; ')} (${plan.basis}). Review before saving.`);

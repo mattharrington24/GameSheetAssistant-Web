@@ -1,4 +1,5 @@
 from workflow import build_entry_steps
+from web_parser import _replace_broken_goal_scorers
 
 
 def sample_game():
@@ -7,6 +8,20 @@ def sample_game():
 
 def sample_shots():
     return {"periods":["1st","2nd","3rd"],"away_team":"Away","away":["8","9","7","24"],"home_team":"Home","home":["6","10","8","24"]}
+
+
+def test_broken_sportsengine_goal_scorer_is_replaced_and_goal_is_retained():
+    goals = [
+        {"team": "Warroad", "period": "1st", "elapsed": "3:27", "scorer": "#17 Genevieve Hendrickson", "assists": []},
+        {"team": "Warroad", "period": "2nd", "elapsed": "2:40", "scorer": "#::[roster-player-43416878].jersey_number:: ::[roster-player-43416878].first_name::", "assists": ["#26 Katy Comstock", "#2 Maddie Skogman"]},
+        {"team": "Warroad", "period": "2nd", "elapsed": "5:14", "scorer": "#13 Talya Hendrickson", "assists": ["#17 Genevieve Hendrickson"]},
+    ]
+
+    repaired = _replace_broken_goal_scorers(goals)
+
+    assert len(repaired) == 3
+    assert repaired[1]["scorer"] in {"#17 Genevieve Hendrickson", "#13 Talya Hendrickson"}
+    assert repaired[1]["scorer_inferred"] is True
 
 
 def test_period_events_are_chronological_and_shots_are_last():

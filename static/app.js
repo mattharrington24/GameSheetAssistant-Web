@@ -64,7 +64,12 @@ function goalieShotsFaced(goalie){
   if(Number.isFinite(saves)&&Number.isFinite(ga))return saves+ga;
   const shots=Number(goalie.shots_against);return Number.isFinite(shots)?shots:null;
 }
-function inferGoaliePlan(team,game,shots,goals,goalies,periods){
+function goalieNumberFromWorkflowStarter(team){
+  const step=(state.data?.workflow||[]).find(item=>item.kind==='goalie-start'&&item.team===team&&/inferred starter/i.test(`${item.title||''} ${item.body||''}`));
+  const match=step?.body?.match(/#\s*(\d+)/);
+  return match?.[1]||null;
+}
+function inferGoaliePlan(team,game,shots,goals,goalies,periods,preferredStarterNumber=null){
   const played=goalies.filter(g=>g.team===team&&clockSeconds(g.minutes)>0);
   if(played.length<2||played.length>periods.length)return null;
   const opponentShots=numericPeriodShots(team===game.away_team?shots.home:shots.away,periods.length);
@@ -83,6 +88,10 @@ function inferGoaliePlan(team,game,shots,goals,goalies,periods){
     if(fits&&cursor===periods.length)valid.push(stints);
   }
   if(valid.length===1)return {team,stints:valid[0],basis:'unique minutes and shots match'};
+  if(preferredStarterNumber){
+    const preferred=valid.find(stints=>String(stints[0]?.goalie?.number||'')===String(preferredStarterNumber));
+    if(preferred)return {team,stints:preferred,basis:'workflow starter inference resolves an otherwise ambiguous minutes and shots match'};
+  }
   const listed=valid.find(stints=>stints.every((stint,i)=>stint.goalie===played[i]));
   if(listed)return {team,stints:listed,basis:'validated SportsEngine goalie order'};
 
@@ -182,7 +191,10 @@ function buildWebFillPayload(){
   const periodCount=(shots.periods||[]).length;
   const awayPlayed=playedGoaliesFor(game.away_team);
   const homePlayed=playedGoaliesFor(game.home_team);
-  const plans=[inferGoaliePlan(game.away_team,game,shots,goals,goalies,shots.periods||[]),inferGoaliePlan(game.home_team,game,shots,goals,goalies,shots.periods||[])].filter(Boolean);
+  const plans=[
+    inferGoaliePlan(game.away_team,game,shots,goals,goalies,shots.periods||[],goalieNumberFromWorkflowStarter(game.away_team)),
+    inferGoaliePlan(game.home_team,game,shots,goals,goalies,shots.periods||[],goalieNumberFromWorkflowStarter(game.home_team))
+  ].filter(Boolean);
   const goalieShotRows=[];
   if(awayPlayed.length===1)goalieShotRows.push({team:game.away_team,goalie:`#${awayPlayed[0].number} ${awayPlayed[0].name}`,periods:numericPeriodShots(shots.home,periodCount)});
   if(homePlayed.length===1)goalieShotRows.push({team:game.home_team,goalie:`#${homePlayed[0].number} ${homePlayed[0].name}`,periods:numericPeriodShots(shots.away,periodCount)});

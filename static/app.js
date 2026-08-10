@@ -65,7 +65,7 @@ function goalieShotsFaced(goalie){
   const shots=Number(goalie.shots_against);return Number.isFinite(shots)?shots:null;
 }
 function goalieNumberFromWorkflowStarter(team){
-  const step=(state.data?.workflow||[]).find(item=>item.kind==='goalie-start'&&item.team===team&&/inferred starter/i.test(`${item.title||''} ${item.body||''}`));
+  const step=(state.data?.workflow||[]).find(item=>item.kind==='goalie-start'&&item.team===team&&/\binferred\b/i.test(`${item.title||''} ${item.body||''}`));
   const match=step?.body?.match(/#\s*(\d+)/);
   return match?.[1]||null;
 }
@@ -235,7 +235,7 @@ function buildWebFillPayload(){
       const goalie=plan.stints[0].goalie;
       return [{team,goalie:`#${goalie.number} ${goalie.name}`,basis:plan.basis}];
     }
-    const workflowStep=(state.data.workflow||[]).find(step=>step.kind==='goalie-start'&&step.team===team&&/inferred starter/i.test(`${step.title} ${step.body}`));
+    const workflowStep=(state.data.workflow||[]).find(step=>step.kind==='goalie-start'&&step.team===team&&/\binferred\b/i.test(`${step.title||''} ${step.body||''}`));
     const match=workflowStep?.body?.match(/#([^\n]+)/);
     if(match)return [{team,goalie:`#${match[1].trim()}`,basis:'GameSheet Assistant workflow inference'}];
     const played=playedGoaliesFor(team);

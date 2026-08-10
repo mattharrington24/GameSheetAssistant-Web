@@ -31,8 +31,8 @@ def test_web_fill_uses_workflow_starter_to_resolve_ambiguous_goalie_order():
             {
                 "kind": "goalie-start",
                 "team": "St. Cloud",
-                "title": "Starting Goalie — Inferred Starter",
-                "body": "INFERRED STARTER — VERIFIED BY MINUTES AND SHOTS\n\n#30 Kailee Falconer",
+                "title": "Starting Goalie — Inferred",
+                "body": "INFERRED ORDER — VERIFIED BY MINUTES AND SHOTS\n\n#30 Kailee Falconer",
             }
         ],
         "source_url": "fixture",

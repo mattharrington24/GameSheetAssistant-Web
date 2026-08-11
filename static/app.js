@@ -110,6 +110,14 @@ function inferGoaliePlan(team,game,shots,goals,goalies,periods,preferredStarterN
     if(fits&&cursor===periods.length)valid.push(stints);
   }
   if(valid.length===1)return {team,stints:valid[0],basis:'unique minutes and shots match'};
+  if(valid.length){
+    const longestSeconds=Math.max(...played.map(goalie=>clockSeconds(goalie.minutes)));
+    const longest=played.filter(goalie=>clockSeconds(goalie.minutes)===longestSeconds);
+    if(longest.length===1){
+      const longestMatches=valid.filter(stints=>stints[0]?.goalie===longest[0]);
+      if(longestMatches.length===1)return {team,stints:longestMatches[0],basis:'longest verified goalie stint starts when period totals tie'};
+    }
+  }
   if(preferredStarterNumber){
     const preferred=valid.find(stints=>String(stints[0]?.goalie?.number||'')===String(preferredStarterNumber));
     if(preferred)return {team,stints:preferred,basis:'workflow starter inference resolves an otherwise ambiguous minutes and shots match'};
@@ -214,8 +222,8 @@ function buildWebFillPayload(){
   const awayPlayed=playedGoaliesFor(game.away_team);
   const homePlayed=playedGoaliesFor(game.home_team);
   const plans=[
-    goaliePlanFromWorkflow(game.away_team,goalies)||inferGoaliePlan(game.away_team,game,shots,goals,goalies,shots.periods||[],goalieNumberFromWorkflowStarter(game.away_team)),
-    goaliePlanFromWorkflow(game.home_team,goalies)||inferGoaliePlan(game.home_team,game,shots,goals,goalies,shots.periods||[],goalieNumberFromWorkflowStarter(game.home_team))
+    inferGoaliePlan(game.away_team,game,shots,goals,goalies,shots.periods||[],goalieNumberFromWorkflowStarter(game.away_team))||goaliePlanFromWorkflow(game.away_team,goalies),
+    inferGoaliePlan(game.home_team,game,shots,goals,goalies,shots.periods||[],goalieNumberFromWorkflowStarter(game.home_team))||goaliePlanFromWorkflow(game.home_team,goalies)
   ].filter(Boolean);
   const goalieShotRows=[];
   if(awayPlayed.length===1)goalieShotRows.push({team:game.away_team,goalie:`#${awayPlayed[0].number} ${awayPlayed[0].name}`,periods:numericPeriodShots(shots.home,periodCount)});

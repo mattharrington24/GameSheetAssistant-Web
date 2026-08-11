@@ -342,18 +342,37 @@ def _infer_goalie_plans(game: dict, shots: dict, goals: list[dict], goalies: lis
             selected = valid[0]
             basis = "unique totals match"
         elif valid:
+            # A 34:00 / 17:00 split is commonly ambiguous when the opponent
+            # recorded the same number of shots in the first and third
+            # periods. In that case both permutations pass the shots check,
+            # but the two-period goalie is the starter convention used by the
+            # source stats and by the workflow card. Resolve that tie before
+            # considering SportsEngine's display order, which is not a shift
+            # chronology and has repeatedly listed the replacement first.
+            longest_seconds = max(_seconds(goalie.get("minutes", "")) for goalie in played)
+            longest = [goalie for goalie in played if _seconds(goalie.get("minutes", "")) == longest_seconds]
+            if len(longest) == 1:
+                longest_matches = [
+                    stints for stints in valid
+                    if stints[0]["goalie"] is longest[0]
+                ]
+                if len(longest_matches) == 1:
+                    selected = longest_matches[0]
+                    basis = "longest verified goalie stint starts when period totals tie"
+
             # Zero-shot periods can make more than one ordering fit the same
             # minutes and save totals. SportsEngine preserves the goalie-table
             # order, so use that ordering only after it has also passed every
             # minutes-and-shots validation above.
-            listed_order = tuple(played)
-            listed_matches = [
-                stints for stints in valid
-                if tuple(stint["goalie"] for stint in stints) == listed_order
-            ]
-            if len(listed_matches) == 1:
-                selected = listed_matches[0]
-                basis = "validated SportsEngine goalie order"
+            if not selected:
+                listed_order = tuple(played)
+                listed_matches = [
+                    stints for stints in valid
+                    if tuple(stint["goalie"] for stint in stints) == listed_order
+                ]
+                if len(listed_matches) == 1:
+                    selected = listed_matches[0]
+                    basis = "validated SportsEngine goalie order"
         if not selected:
             selected = _partial_period_goalie_plan(played, opponent_shots, period_lengths)
             if selected:

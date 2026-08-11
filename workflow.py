@@ -441,12 +441,32 @@ def _goalie_steps(game: dict, goalies: list[dict], goalie_plans: dict[str, dict]
         else:
             body = "No goalie record was parsed. Confirm and select the starting goalie manually."
 
-        steps.append({
+        step = {
             "title": "Starting Goalie — Inferred" if plan else "Starting Goalie",
             "kind": "goalie-start",
             "team": team,
             "body": body,
-        })
+        }
+        if plan:
+            step["starter_number"] = str(plan["stints"][0]["goalie"]["number"])
+            step["goalie_stints"] = [
+                {
+                    "number": str(stint["goalie"]["number"]),
+                    "name": stint["goalie"]["name"],
+                    "start": stint["start"],
+                    "end": stint["end"],
+                    "start_time": stint.get("start_time"),
+                    "end_time": stint.get("end_time"),
+                    "change_period": stint.get("change_period"),
+                    "partial_start": bool(stint.get("partial_start")),
+                    "partial_end": bool(stint.get("partial_end")),
+                }
+                for stint in plan["stints"]
+            ]
+            step["goalie_plan_basis"] = plan["basis"]
+        elif len(played) == 1:
+            step["starter_number"] = str(played[0]["number"])
+        steps.append(step)
     return steps
 
 

@@ -124,6 +124,41 @@ def test_web_fill_repairs_stale_reversed_workflow_goalie_order():
     ]
 
 
+def test_web_fill_does_not_override_current_verified_goalie_order():
+    source = (ROOT / "static" / "app.js").read_text().split("async function copyWebFillData", 1)[0]
+    data = {
+        "game": {"away_team": "Princeton/Big Lake/Becker", "home_team": "Chisago Lakes", "away_score": 1, "home_score": 2},
+        "shots": {"periods": ["1", "2", "3"], "away": [5, 7, 5], "home": [6, 8, 6]},
+        "goals": [], "penalties": [], "source_url": "fixture",
+        "goalies": [
+            {"team": "Princeton/Big Lake/Becker", "number": "1", "name": "Mackenzie Dembinski", "minutes": "34:00", "saves": "12", "goals_against": "2"},
+            {"team": "Princeton/Big Lake/Becker", "number": "33", "name": "Shelby Ulm", "minutes": "17:00", "saves": "5", "goals_against": "1"},
+            {"team": "Chisago Lakes", "number": "1", "name": "Breanna Ritter", "minutes": "34:00", "saves": "9", "goals_against": "3"},
+            {"team": "Chisago Lakes", "number": "40", "name": "Anna Hanson", "minutes": "17:00", "saves": "4", "goals_against": "1"},
+        ],
+        "workflow": [
+            {"kind": "goalie-start", "team": "Princeton/Big Lake/Becker", "starter_number": "33", "goalie_plan_basis": "verified by minutes and period shots", "goalie_stints": [
+                {"number": "33", "name": "Shelby Ulm", "start": 0, "end": 2},
+                {"number": "1", "name": "Mackenzie Dembinski", "start": 2, "end": 3},
+            ]},
+            {"kind": "goalie-start", "team": "Chisago Lakes", "starter_number": "40", "goalie_plan_basis": "verified by minutes and period shots", "goalie_stints": [
+                {"number": "40", "name": "Anna Hanson", "start": 0, "end": 2},
+                {"number": "1", "name": "Breanna Ritter", "start": 2, "end": 3},
+            ]},
+        ],
+    }
+    script = source + f"\nstate.data={json.dumps(data)};console.log(JSON.stringify(buildWebFillPayload().goalie_shifts));"
+    result = subprocess.run(["node", "-e", script], cwd=ROOT, check=True, capture_output=True, text=True)
+    shifts = json.loads(result.stdout)
+
+    assert [(row["period"], row["goalie"]) for row in shifts if row["team"] == data["game"]["away_team"]] == [
+        ("1", "#33 Shelby Ulm"), ("3", "#1 Mackenzie Dembinski")
+    ]
+    assert [(row["period"], row["goalie"]) for row in shifts if row["team"] == data["game"]["home_team"]] == [
+        ("1", "#40 Anna Hanson"), ("3", "#1 Breanna Ritter")
+    ]
+
+
 def test_goalie_steps_export_the_verified_plan_as_structured_data():
     game = {"away_team": "Princeton/Big Lake/Becker", "home_team": "Chisago Lakes"}
     ulm = {"team": game["away_team"], "number": "33", "name": "Shelby Ulm", "minutes": "34:00", "goals_against": "2"}

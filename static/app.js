@@ -89,7 +89,7 @@ function goaliePlanFromWorkflow(team,goalies){
       partial_end:!!saved.partial_end,
     });
   }
-  return {team,stints,basis:step.goalie_plan_basis||'verified GameSheet Assistant goalie order'};
+  return {team,stints,basis:step.goalie_plan_basis||'verified GameSheet Assistant goalie order',verified:!!step.goalie_plan_basis};
 }
 function inferGoaliePlan(team,game,shots,goals,goalies,periods,preferredStarterNumber=null){
   const played=goalies.filter(g=>g.team===team&&clockSeconds(g.minutes)>0);
@@ -146,6 +146,16 @@ function inferGoaliePlan(team,game,shots,goals,goalies,periods,preferredStarterN
     }
   }
   return null;
+}
+function resolvedGoaliePlan(team,game,shots,goals,goalies,periods){
+  const workflowPlan=goaliePlanFromWorkflow(team,goalies);
+  // A current workflow plan carries goalie_plan_basis only after the backend
+  // has validated the order against minutes and period shots. Preserve that
+  // result instead of independently reversing it in Web Fill. Older saved
+  // browser data did not carry this marker, so it still goes through the
+  // inference path below and can be repaired.
+  if(workflowPlan?.verified)return workflowPlan;
+  return inferGoaliePlan(team,game,shots,goals,goalies,periods,goalieNumberFromWorkflowStarter(team))||workflowPlan;
 }
 function penaltyRelease(penalty,goals,length,periods=[]){
   if(/penalty shot/i.test(penalty.penalty))return {time:penalty.remaining,period:penalty.period,crosses_period:false};
@@ -222,8 +232,8 @@ function buildWebFillPayload(){
   const awayPlayed=playedGoaliesFor(game.away_team);
   const homePlayed=playedGoaliesFor(game.home_team);
   const plans=[
-    inferGoaliePlan(game.away_team,game,shots,goals,goalies,shots.periods||[],goalieNumberFromWorkflowStarter(game.away_team))||goaliePlanFromWorkflow(game.away_team,goalies),
-    inferGoaliePlan(game.home_team,game,shots,goals,goalies,shots.periods||[],goalieNumberFromWorkflowStarter(game.home_team))||goaliePlanFromWorkflow(game.home_team,goalies)
+    resolvedGoaliePlan(game.away_team,game,shots,goals,goalies,shots.periods||[]),
+    resolvedGoaliePlan(game.home_team,game,shots,goals,goalies,shots.periods||[])
   ].filter(Boolean);
   const goalieShotRows=[];
   if(awayPlayed.length===1)goalieShotRows.push({team:game.away_team,goalie:`#${awayPlayed[0].number} ${awayPlayed[0].name}`,periods:numericPeriodShots(shots.home,periodCount)});

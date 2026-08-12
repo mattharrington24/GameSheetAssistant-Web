@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · GameSheet Assistant</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body class="login-page">
+  <main class="login-shell card">
+    <div class="puck">🏒</div>
+    <p class="eyebrow">PRIVATE ACCESS</p>
+    <h1>GameSheet Assistant</h1>
+    <p class="hint">Enter the password configured for this deployment.</p>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <form method="post" class="login-form">
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+      <button class="primary" type="submit">Sign in</button>
+    </form>
+  </main>
+</body>
+</html>

@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07172b">
+  <title>Roster Comparison · GameSheet Assistant</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-wrap">
+      <div class="brand-mark" aria-hidden="true">🏒</div>
+      <div>
+        <p class="eyebrow">MINNESOTA HOCKEY DATA ENTRY</p>
+        <h1>Roster Comparison</h1>
+      </div>
+    </div>
+    <div class="top-actions">
+      <a class="ghost-on-dark nav-link" href="{{ url_for('index') }}">GameSheet Assistant</a>
+      {% if auth_enabled %}
+      <form method="post" action="{{ url_for('logout') }}"><button class="ghost-on-dark" type="submit">Sign out</button></form>
+      {% endif %}
+    </div>
+  </header>
+
+  <main class="roster-shell">
+    <nav class="mode-tabs card" aria-label="Roster tools">
+      <button class="mode-tab active" data-mode="teamCompare">Compare Two Rosters</button>
+      <button class="mode-tab" data-mode="transferFinder">Find Transfers</button>
+    </nav>
+
+    <div id="teamCompare" class="mode-panel active">
+    <section class="card roster-form">
+      <div>
+        <p class="eyebrow">YEAR-TO-YEAR CHECK</p>
+        <h2>Who returned, who is new, and who left?</h2>
+        <p class="form-help">Paste the older roster first and the following season’s roster second.</p>
+      </div>
+      <label for="previousRoster">Previous-season SportsEngine roster URL</label>
+      <input id="previousRoster" type="url" placeholder="https://stats.mngirlshockeyhub.com/roster/show/..." autocomplete="off">
+      <label for="currentRoster">Current-season SportsEngine roster URL</label>
+      <input id="currentRoster" type="url" placeholder="https://stats.mngirlshockeyhub.com/roster/show/..." autocomplete="off">
+      <button id="compareRosters" class="primary">Compare Rosters</button>
+      <div id="rosterError" class="error hidden"></div>
+    </section>
+
+    <section id="rosterResults" class="hidden">
+      <section class="card comparison-summary">
+        <div>
+          <p class="eyebrow">COMPARISON COMPLETE</p>
+          <h2 id="comparisonTitle">Roster Results</h2>
+        </div>
+        <div class="comparison-counts">
+          <div><strong id="returningCount">0</strong><span>Returning</span></div>
+          <div><strong id="newCount">0</strong><span>New</span></div>
+          <div><strong id="departedCount">0</strong><span>Departed</span></div>
+        </div>
+      </section>
+      <div class="roster-columns">
+        <section class="card result-group returning-group">
+          <div class="result-heading"><div><p class="eyebrow">BOTH SEASONS</p><h2>Returning</h2></div><button data-copy="returning">Copy</button></div>
+          <div id="returningPlayers" class="player-list"></div>
+        </section>
+        <section class="card result-group new-group">
+          <div class="result-heading"><div><p class="eyebrow">CURRENT SEASON ONLY</p><h2>New</h2></div><button data-copy="new">Copy</button></div>
+          <div id="newPlayers" class="player-list"></div>
+        </section>
+        <section class="card result-group departed-group">
+          <div class="result-heading"><div><p class="eyebrow">PREVIOUS SEASON ONLY</p><h2>Departed</h2></div><button data-copy="departed">Copy</button></div>
+          <div id="departedPlayers" class="player-list"></div>
+        </section>
+      </div>
+      <section id="possibleMatchGroup" class="card result-group possible-group hidden">
+        <div class="result-heading">
+          <div><p class="eyebrow">SAME LAST NAME ACROSS SEASONS</p><h2>Needs Review</h2></div>
+          <span id="possibleMatchCount" class="percent">0</span>
+        </div>
+        <p class="form-help">Every unmatched pair sharing a last name appears here. Confirm only when both names belong to the same player. The tool will remember your decision on this browser.</p>
+        <div id="possibleMatchPlayers" class="player-list possible-list"></div>
+      </section>
+    </section>
+    </div>
+
+    <div id="transferFinder" class="mode-panel">
+      <section class="card roster-form">
+        <div>
+          <p class="eyebrow">STATEWIDE SEASON SCAN</p>
+          <h2>Find players who changed schools</h2>
+          <p class="form-help">Paste two MSHSL season-hub URLs. The first scan can take several minutes while the tool visits each team roster.</p>
+        </div>
+        <label for="previousSeason">Previous-season hub URL</label>
+        <input id="previousSeason" type="url" value="https://stats.mngirlshockeyhub.com/page/show/5878509?subseason=697635" autocomplete="off">
+        <label for="currentSeason">Following-season hub URL</label>
+        <input id="currentSeason" type="url" value="https://stats.mngirlshockeyhub.com/page/show/6547398-mshsl-2009-25-2021-2022-?subseason=763089" autocomplete="off">
+        <button id="findTransfers" class="primary">Find Transfers</button>
+        <div id="transferError" class="error hidden"></div>
+        <div id="transferProgress" class="scan-progress hidden">
+          <div class="progress-track"><div id="transferProgressBar" class="progress-fill"></div></div>
+          <strong id="transferStage">Starting…</strong>
+          <span id="transferProgressText"></span>
+        </div>
+      </section>
+
+      <section id="transferResults" class="hidden">
+        <section class="card comparison-summary">
+          <div>
+            <p class="eyebrow">TRANSFER SCAN COMPLETE</p>
+            <h2>Possible Transfers</h2>
+            <p id="avaCheck" class="validation-badge"></p>
+          </div>
+          <div class="comparison-counts transfer-counts">
+            <div><strong id="transferCount">0</strong><span>Likely</span></div>
+            <div><strong id="reviewCount">0</strong><span>Review</span></div>
+            <div><strong id="teamCount">0</strong><span>Teams scanned</span></div>
+          </div>
+        </section>
+        <section class="card result-group transfer-group">
+          <div class="result-heading"><div><p class="eyebrow">EXACT NAME MATCHES</p><h2>Likely Transfers</h2></div><button id="copyTransfers">Copy</button></div>
+          <div id="transferPlayers" class="player-list transfer-list"></div>
+        </section>
+        <section id="reviewGroup" class="card result-group hidden">
+          <div class="result-heading"><div><p class="eyebrow">DUPLICATE NAME</p><h2>Needs Review</h2></div></div>
+          <div id="reviewPlayers" class="player-list transfer-list"></div>
+        </section>
+        <section id="scanWarnings" class="card hidden">
+          <p class="eyebrow">INCOMPLETE PAGES</p>
+          <h2>Scan Warnings</h2>
+          <p id="warningText" class="form-help"></p>
+        </section>
+      </section>
+    </div>
+  </main>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"><span id="toastMessage"></span></div>
+  <script src="{{ url_for('static', filename='rosters.js') }}"></script>
+</body>
+</html>

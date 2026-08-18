@@ -204,26 +204,65 @@ function penaltyClassCode(value,kind){
 }
 function expandPenaltiesForWebFill(items){
   const expanded=[];
+
   for(const penalty of items){
     const text=String(penalty.penalty||'');
+
     if(/\bmajor\b/i.test(text)&&/\bmisconduct\b/i.test(text)){
-      expanded.push({...penalty,penalty:penaltyClassCode(text,'Major'),paired_major_misconduct:true});
-      expanded.push({...penalty,penalty:penaltyClassCode(text,'Misconduct'),paired_major_misconduct:true});
-    }else expanded.push({...penalty});
+      const misconductKind=/\bgame\s+misconduct\b/i.test(text)
+        ? 'Game Misconduct'
+        : 'Misconduct';
+
+      expanded.push({
+        ...penalty,
+        penalty:penaltyClassCode(text,'Major'),
+        paired_major_misconduct:true
+      });
+
+      expanded.push({
+        ...penalty,
+        penalty:penaltyClassCode(text,misconductKind),
+        paired_major_misconduct:true
+      });
+    }else{
+      expanded.push({...penalty});
+    }
   }
+
   const groups=new Map();
+
   for(const penalty of expanded){
-    const key=[penalty.team,periodKey(penalty.period),penalty.remaining,penalty.player].join('|');
-    if(!groups.has(key))groups.set(key,[]);groups.get(key).push(penalty);
+    const key=[
+      penalty.team,
+      periodKey(penalty.period),
+      penalty.remaining,
+      penalty.player
+    ].join('|');
+
+    if(!groups.has(key))groups.set(key,[]);
+    groups.get(key).push(penalty);
   }
+
   for(const group of groups.values()){
     const major=group.find(item=>/\bmajor\b/i.test(item.penalty));
     const misconduct=group.find(item=>/\bmisconduct\b/i.test(item.penalty));
+
     if(major&&misconduct){
       for(const item of group)item.paired_major_misconduct=true;
-      if(/^\s*misconduct\b/i.test(misconduct.penalty))misconduct.penalty=penaltyClassCode(major.penalty,'Misconduct');
+
+      if(/^\s*(?:game\s+)?misconduct\b/i.test(misconduct.penalty)){
+        const misconductKind=/\bgame\s+misconduct\b/i.test(misconduct.penalty)
+          ? 'Game Misconduct'
+          : 'Misconduct';
+
+        misconduct.penalty=penaltyClassCode(
+          major.penalty,
+          misconductKind
+        );
+      }
     }
   }
+
   return expanded;
 }
 function buildWebFillPayload(){

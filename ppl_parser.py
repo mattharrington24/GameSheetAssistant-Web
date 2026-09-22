@@ -137,6 +137,10 @@ def _full_player(value: str, roster: dict[str, str]) -> str:
 def _team_for_label(label: str, home_team: str, away_team: str) -> str:
     normalized = re.sub(r"[^a-z0-9]", "", _clean(label).lower())
     matches = []
+    active_period_lengths = [
+        OVERTIME_SECONDS if period.startswith("OT") else REGULATION_SECONDS
+        for period in active_periods
+    ]
     for team in (home_team, away_team):
         words = re.findall(r"[a-z0-9]+", team.lower())
         if normalized and (normalized == "".join(words) or normalized in words or normalized == words[-1]):
@@ -173,6 +177,9 @@ def _penalty_description(offense: str, minutes: str) -> str:
         "cross-checking": "Cross-Checking",
         "body checking": "Body Checking",
         "checking from behind": "Checking From Behind",
+        "high stick": "High Sticking",
+        "high-sticking": "High Sticking",
+        "high sticking": "High Sticking",
     }
     offense = canonical_offenses.get(offense.casefold(), offense)
     length = int(minutes) if str(minutes).isdigit() else 2
@@ -314,7 +321,29 @@ def parse_ppl_docx(file_object: BinaryIO) -> dict[str, Any]:
             "minutes": minutes, "shots_against": str(saves + goals_against),
             "goals_against": str(goals_against), "saves": str(saves),
             "save_percentage": _save_percentage(saves, goals_against),
+            "_period_saves": saves_by_period,
         })
+
+    # Some PPL sheets leave Minutes Played blank even though each goalie's
+    # period is explicit in the saves grid.  When one goalie has saves in only
+    # one period, that row provides an unambiguous 25-minute stint and starter
+    # order without relying on the missing minutes cell.
+    for team in (home_team, away_team):
+        team_goalies = [goalie for goalie in goalies if goalie["team"] == team]
+        used_periods: set[int] = set()
+        inferred: list[tuple[dict[str, Any], int]] = []
+        for goalie in team_goalies:
+            active = [index for index, saves in enumerate(goalie["_period_saves"]) if saves > 0]
+            if len(active) == 1:
+                inferred.append((goalie, active[0]))
+                used_periods.add(active[0])
+        if len(used_periods) == len(inferred):
+            for goalie, period_index in inferred:
+                if goalie["minutes"] == "0:00" and period_index < len(active_period_lengths):
+                    goalie["minutes"] = _clock_text(active_period_lengths[period_index])
+
+    for goalie in goalies:
+        goalie.pop("_period_saves", None)
 
     goal_counts = {
         home_team: Counter(goal["period"] for goal in goals if goal["team"] == home_team),

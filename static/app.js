@@ -48,6 +48,11 @@ async function copyCurrentStep(){if(!state.data)return;const s=state.data.workfl
 function numericPeriodShots(values, count){
   return (values||[]).slice(0,count).map(value=>Number.isFinite(Number(value))?Number(value):null);
 }
+function periodLengthSeconds(shots,index,period){
+  const configured=Number((shots.period_lengths||[])[index]);
+  if(Number.isFinite(configured)&&configured>0)return configured;
+  return String(period||'').toUpperCase().startsWith('OT')?8*60:17*60;
+}
 function playedGoaliesFor(team){
   return (state.data.goalies||[]).filter(g=>g.team===team&&g.minutes!=='0:00');
 }
@@ -96,7 +101,7 @@ function inferGoaliePlan(team,game,shots,goals,goalies,periods,preferredStarterN
   if(played.length<2||played.length>periods.length)return null;
   const opponentShots=numericPeriodShots(team===game.away_team?shots.home:shots.away,periods.length);
   if(opponentShots.some(value=>value===null))return null;
-  const lengths=periods.map(period=>String(period).toUpperCase().startsWith('OT')?8*60:17*60);
+  const lengths=periods.map((period,index)=>periodLengthSeconds(shots,index,period));
   const valid=[];
   for(const ordering of permutations(played)){
     let cursor=0;const stints=[];let fits=true;
@@ -157,7 +162,8 @@ function resolvedGoaliePlan(team,game,shots,goals,goalies,periods){
   if(workflowPlan?.verified)return workflowPlan;
   return inferGoaliePlan(team,game,shots,goals,goalies,periods,goalieNumberFromWorkflowStarter(team))||workflowPlan;
 }
-function penaltyRelease(penalty,goals,length,periods=[]){
+function penaltyRelease(penalty,goals,length,periods=[],periodLengths=[]){
+  if(penalty.time_on)return {time:penalty.time_on,period:penalty.period,crosses_period:false};
   if(/penalty shot/i.test(penalty.penalty))return {time:penalty.remaining,period:penalty.period,crosses_period:false};
   const off=clockSeconds(penalty.remaining);if(off===null)return {time:'',period:penalty.period,crosses_period:false};
   const duration=(Number(length)||2)*60;
@@ -168,7 +174,8 @@ function penaltyRelease(penalty,goals,length,periods=[]){
   if(releaseSeconds<0&&startIndex>=0){
     let remaining=-releaseSeconds;
     for(let index=startIndex+1;index<periods.length;index++){
-      const periodLength=String(periods[index]).toUpperCase().startsWith('OT')?8*60:17*60;
+      const configured=Number(periodLengths[index]);
+      const periodLength=Number.isFinite(configured)&&configured>0?configured:(String(periods[index]).toUpperCase().startsWith('OT')?8*60:17*60);
       crossesPeriod=true;
       releasePeriod=periods[index];
       if(remaining<=periodLength){releaseSeconds=periodLength-remaining;break;}
@@ -284,9 +291,9 @@ function buildWebFillPayload(){
       return i>=stint.start&&i<stint.end?value:0;
     })});
   }
-  const goalieShifts=plans.flatMap(plan=>plan.stints.map(stint=>({team:plan.team,period:shots.periods[stint.start],time:stint.start_time||(String(shots.periods[stint.start]).toUpperCase().startsWith('OT')?'8:00':'17:00'),goalie:`#${stint.goalie.number} ${stint.goalie.name}`,basis:plan.basis})));
+  const goalieShifts=plans.flatMap(plan=>plan.stints.map(stint=>({team:plan.team,period:shots.periods[stint.start],time:stint.start_time||clockText(periodLengthSeconds(shots,stint.start,shots.periods[stint.start])),goalie:`#${stint.goalie.number} ${stint.goalie.name}`,basis:plan.basis})));
   for(const [team,played] of [[game.away_team,awayPlayed],[game.home_team,homePlayed]]){
-    if(played.length===1&&!plans.some(plan=>plan.team===team))goalieShifts.push({team,period:shots.periods[0]||'1',time:'17:00',goalie:`#${played[0].number} ${played[0].name}`,basis:'only goalie who played'});
+    if(played.length===1&&!plans.some(plan=>plan.team===team))goalieShifts.push({team,period:shots.periods[0]||'1',time:clockText(periodLengthSeconds(shots,0,shots.periods[0]||'1')),goalie:`#${played[0].number} ${played[0].name}`,basis:'only goalie who played'});
   }
   for(const goal of goals.filter(item=>/empty\s+net/i.test(item.strength||''))){
     const defending=goal.team===game.away_team?game.home_team:game.away_team;
@@ -338,7 +345,7 @@ function buildWebFillPayload(){
   }
   const webPenaltyRows=webPenalties.map(p=>{
     const length=penaltyLength(p.penalty);
-    const release=penaltyRelease(p,goals,length,shots.periods||[]);
+    const release=penaltyRelease(p,goals,length,shots.periods||[],shots.period_lengths||[]);
     const isPairedMajor=p.paired_major_misconduct&&/\bmajor\b/i.test(p.penalty);
     const isBenchPenalty=/^(?:team\s*\/\s*bench|team|bench)$/i.test(String(p.player||'').trim());
     return {team:p.team,period:p.period,offender:p.player,served_by:p.player,served_by_strategy:isPairedMajor||isBenchPenalty?'deterministic_teammate':'offender',offender_strategy:isBenchPenalty?'team_or_roster_fallback':'player_or_roster_fallback',length,code:isUnspecifiedMinorPenalty(p.penalty)?unspecifiedMinorFallback(p):p.penalty,time_off:p.remaining,time_start:p.remaining,time_on:release.time,time_on_period:release.period,crosses_period:release.crosses_period,type_inferred:isUnspecifiedMinorPenalty(p.penalty)};
@@ -377,6 +384,23 @@ async function importGame(rawValue,{fromBatch=false}={}){
     $('emptyState').classList.add('hidden');$('gameWorkspace').classList.remove('hidden');selectTab('workflow');
     if(fromBatch)updateBatchStatus();saveState();showToast('Game imported');
   }catch(error){showError(error.message);}finally{setLoading(false);}
+}
+async function importPplDocx(){
+  const file=$('pplFileInput').files?.[0];
+  if(!file)return showError('Choose a PPL Word .docx scoresheet.');
+  setLoading(true);showError('');
+  $('pplImportButton').disabled=true;$('pplImportButton').textContent='Importing…';
+  try{
+    const formData=new FormData();formData.append('file',file);
+    const response=await fetch('/api/import/ppl-docx',{method:'POST',body:formData});
+    if(response.status===401){window.location.href='/login';return;}
+    const payload=await response.json();if(!response.ok||!payload.ok)throw new Error(payload.error||'PPL import failed');
+    state.data=payload.data;state.workflowIndex=0;renderAll();
+    $('emptyState').classList.add('hidden');$('gameWorkspace').classList.remove('hidden');selectTab('workflow');
+    saveState();showToast('PPL scoresheet imported');
+  }catch(error){showError(error.message);}finally{
+    setLoading(false);$('pplImportButton').disabled=false;$('pplImportButton').textContent='Import PPL Scoresheet';
+  }
 }
 function renderAll(){
   const {game,shots,goals,penalties,goalies,validation}=state.data;
@@ -516,6 +540,7 @@ function updateBatchStatus(){
 }
 
 $('importButton').addEventListener('click',()=>importGame($('gameInput').value));
+$('pplImportButton').addEventListener('click',importPplDocx);
 $('gameInput').addEventListener('keydown',e=>{if(e.key==='Enter')importGame(e.target.value)});
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>selectTab(b.dataset.tab)));
 $('previousStep').addEventListener('click',()=>changeWorkflow(-1));$('nextStep').addEventListener('click',()=>changeWorkflow(1));$('copyStep').addEventListener('click',copyCurrentStep);$('copyWebFill').addEventListener('click',copyWebFillData);$('finishGame').addEventListener('click',finishCurrentGame);

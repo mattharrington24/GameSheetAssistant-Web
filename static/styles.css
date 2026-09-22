@@ -45,6 +45,8 @@ h2 { margin:4px 0 0; font-size:clamp(1.35rem,2.5vw,2rem); }
 .main-column { min-width:0; }
 input,textarea { width:100%; border:1px solid #b8c8d8; border-radius:12px; padding:13px 14px; background:var(--surface-2); color:var(--ink); }
 input:focus,textarea:focus { outline:3px solid rgba(45,127,249,.18); border-color:var(--blue); }
+input[type="file"] { padding:9px; background:var(--surface); }
+.field-help { margin:0; color:var(--muted); font-size:.82rem; line-height:1.35; }
 button { border:1px solid #b8c8d8; background:var(--surface); color:var(--ink); border-radius:11px; padding:11px 15px; font-weight:800; cursor:pointer; }
 .nav-link { display:inline-flex; align-items:center; text-decoration:none; border:1px solid rgba(255,255,255,.32); border-radius:11px; padding:10px 14px; font-weight:800; }
 button:hover { transform:translateY(-1px); box-shadow:0 7px 18px rgba(16,43,71,.16); }

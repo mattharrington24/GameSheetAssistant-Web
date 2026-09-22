@@ -31,7 +31,7 @@ def _goalie_pull_time(goal_remaining: str) -> str:
     return _format_clock(pull_seconds)
 
 
-def _scheduled_minor_on_time(remaining: str, period: str, periods: list[str]) -> str:
+def _scheduled_minor_on_time(remaining: str, period: str, periods: list[str], period_lengths: list[int] | None = None) -> str:
     """Return the full two-minute minor expiration shown on GameSheet cards.
 
     GameSheet needs a Back On Ice time for ordinary minors in order to infer
@@ -48,7 +48,10 @@ def _scheduled_minor_on_time(remaining: str, period: str, periods: list[str]) ->
     carry = 120 - remaining_seconds
     current_index = next((i for i, value in enumerate(periods) if _same_period(value, period)), None)
     next_period = periods[current_index + 1] if current_index is not None and current_index + 1 < len(periods) else None
-    if next_period and str(next_period).upper().strip().startswith("OT"):
+    next_index = current_index + 1 if current_index is not None else None
+    if next_index is not None and period_lengths and next_index < len(period_lengths):
+        next_length = int(period_lengths[next_index])
+    elif next_period and str(next_period).upper().strip().startswith("OT"):
         next_length = 8 * 60
     else:
         next_length = 17 * 60
@@ -202,7 +205,11 @@ def _shot_step(shots: dict, period: str, index: int) -> dict:
     }
 
 
-def _period_length(period: str) -> int:
+def _period_length(period: str, periods: list[str] | None = None, period_lengths: list[int] | None = None) -> int:
+    if periods and period_lengths:
+        index = next((i for i, value in enumerate(periods) if _same_period(value, period)), None)
+        if index is not None and index < len(period_lengths):
+            return int(period_lengths[index])
     return 8 * 60 if str(period).upper().strip().startswith("OT") else 17 * 60
 
 
@@ -306,7 +313,7 @@ def _infer_goalie_plans(game: dict, shots: dict, goals: list[dict], goalies: lis
         opponent_shots = _resolved_period_shots(opponent_values, len(periods))
         if opponent_shots is None:
             continue
-        period_lengths = [_period_length(period) for period in periods]
+        period_lengths = [_period_length(period, periods, shots.get("period_lengths")) for period in periods]
         valid = []
         for ordering in permutations(played):
             period_cursor = 0
@@ -416,7 +423,7 @@ def _goalie_steps(game: dict, goalies: list[dict], goalie_plans: dict[str, dict]
             if starter_stint.get("partial_end"):
                 change_period = goalie_plans[team]["periods"][starter_stint["change_period"]]
                 full_periods = [_period_label(value) for value in goalie_plans[team]["periods"][:starter_stint["change_period"]]]
-                elapsed_in_change = _period_length(change_period) - _seconds(starter_stint["end_time"])
+                elapsed_in_change = plan["period_lengths"][starter_stint["change_period"]] - _seconds(starter_stint["end_time"])
                 coverage_text = (
                     (" and ".join(full_periods) + " plus ") if full_periods else ""
                 ) + f"{_format_clock(elapsed_in_change)} elapsed in {_period_label(change_period)}"
@@ -497,8 +504,9 @@ def _goalie_change_steps(goalie_plans: dict[str, dict], period: str) -> list[dic
             if not _same_period(start_period, period):
                 continue
             goalie = stint["goalie"]
-            start_time = stint.get("start_time", _format_clock(_period_length(period)))
-            at_period_start = start_time == _format_clock(_period_length(period))
+            period_length = plan["period_lengths"][stint["start"]]
+            start_time = stint.get("start_time", _format_clock(period_length))
+            at_period_start = start_time == _format_clock(period_length)
             instruction = (
                 f"⚠ CHANGE GOALIE BEFORE STARTING {_period_label(period).upper()}\n\n"
                 if at_period_start else
@@ -533,6 +541,7 @@ def build_entry_steps(game, shots, goals, penalties, goalies):
     goalie_plans = _infer_goalie_plans(game, shots, goals, goalies, periods)
     for plan in goalie_plans.values():
         plan["periods"] = periods
+        plan["period_lengths"] = [_period_length(period, periods, shots.get("period_lengths")) for period in periods]
 
     steps = [{
         "title": "Game Information",
@@ -624,7 +633,9 @@ def build_entry_steps(game, shots, goals, penalties, goalies):
                 elif event.get("release_review"):
                     warning = "\n\n⚠ REVIEW RELEASE TIME\nThis minor overlaps a power-play goal and may end early."
                 elif _is_standard_minor(event):
-                    on_time = _scheduled_minor_on_time(event.get("remaining", ""), period, periods)
+                    on_time = event.get("time_on") or _scheduled_minor_on_time(
+                        event.get("remaining", ""), period, periods, shots.get("period_lengths")
+                    )
 
                 penalty_type, duration = _penalty_card_details(event)
                 on_line = f"{on_time} remaining" if on_time else "Not applicable / confirm in GameSheet"

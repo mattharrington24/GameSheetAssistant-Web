@@ -36,6 +36,14 @@
         <div id="errorBox" class="error hidden"></div>
       </div>
 
+      <div class="sidebar-section">
+        <p class="eyebrow">PPL WORD IMPORT</p>
+        <label for="pplFileInput">Premier Prep League scoresheet</label>
+        <input id="pplFileInput" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+        <button id="pplImportButton" class="primary full-width" type="button">Import PPL Scoresheet</button>
+        <p class="field-help">For the standard PPL Word scoresheet with two 25-minute periods.</p>
+      </div>
+
       <div class="sidebar-section compact">
         <p class="eyebrow">SESSION</p>
         <div class="metric-grid">
@@ -61,8 +69,8 @@
       <section id="emptyState" class="empty-state card">
         <div class="empty-icon">🏒</div>
         <p class="eyebrow">READY TO IMPORT</p>
-        <h2>Turn a SportsEngine box score into a GameSheet workflow</h2>
-        <p>Import one game or load a full batch. The assistant prepares shots, goalies, goals, penalties, validation, and step-by-step entry instructions.</p>
+        <h2>Turn a box score into a GameSheet workflow</h2>
+        <p>Import a SportsEngine game or a PPL Word scoresheet. The assistant prepares shots, goalies, goals, penalties, validation, and step-by-step entry instructions.</p>
       </section>
 
       <section id="gameWorkspace" class="hidden">

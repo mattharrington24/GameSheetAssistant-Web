@@ -17,6 +17,7 @@ from flask import Flask, jsonify, redirect, render_template, request, session, u
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from web_parser import SportsEngineParser
+from ppl_parser import parse_ppl_docx
 from roster_compare import (
     compare_rosters,
     find_transfers,
@@ -29,7 +30,7 @@ from roster_compare import (
 
 app = Flask(__name__)
 app.config.update(
-    MAX_CONTENT_LENGTH=2 * 1024 * 1024,
+    MAX_CONTENT_LENGTH=6 * 1024 * 1024,
     SECRET_KEY=os.environ.get("SECRET_KEY", "local-development-only-change-me"),
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
@@ -285,6 +286,25 @@ def import_game():
     except Exception as error:
         app.logger.exception("Unexpected import error")
         return jsonify({"ok": False, "error": f"Unexpected parser error: {error}"}), 500
+
+
+@app.post("/api/import/ppl-docx")
+@auth_required
+def import_ppl_docx():
+    uploaded = request.files.get("file")
+    if not uploaded or not uploaded.filename:
+        return jsonify({"ok": False, "error": "Choose a PPL Word .docx scoresheet."}), 400
+    if not uploaded.filename.lower().endswith(".docx"):
+        return jsonify({"ok": False, "error": "PPL imports require a Word .docx file."}), 400
+    try:
+        parsed = parse_ppl_docx(uploaded.stream)
+        parsed["source_url"] = uploaded.filename
+        return jsonify({"ok": True, "data": parsed})
+    except ValueError as error:
+        return jsonify({"ok": False, "error": str(error)}), 400
+    except Exception as error:
+        app.logger.exception("Unexpected PPL Word import error")
+        return jsonify({"ok": False, "error": f"Unexpected PPL parser error: {error}"}), 500
 
 
 @app.post("/api/rosters/compare")

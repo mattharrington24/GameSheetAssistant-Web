@@ -168,6 +168,13 @@ def _period_label(index: int) -> str:
 
 def _penalty_description(offense: str, minutes: str) -> str:
     offense = _clean(offense) or "Minor"
+    canonical_offenses = {
+        "cross checking": "Cross-Checking",
+        "cross-checking": "Cross-Checking",
+        "body checking": "Body Checking",
+        "checking from behind": "Checking From Behind",
+    }
+    offense = canonical_offenses.get(offense.casefold(), offense)
     length = int(minutes) if str(minutes).isdigit() else 2
     if length >= 10 or "misconduct" in offense.lower():
         kind = "Game Misconduct" if "game" in offense.lower() else "Misconduct"

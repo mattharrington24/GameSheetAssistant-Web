@@ -328,6 +328,8 @@ function buildWebFillPayload(){
     return played.length===1?[{team,goalie:`#${played[0].number} ${played[0].name}`,basis:'only goalie who played'}]:[];
   });
   const warnings=[];
+  for(const goal of goals.filter(item=>item.time_inferred))warnings.push(`${goal.team} ${goal.period}: the PPL scoresheet did not list a goal time; GameSheet Assistant assigned ${goal.remaining} remaining.`);
+  for(const penalty of penalties.filter(item=>item.time_inferred))warnings.push(`${penalty.team} ${penalty.period}: the PPL scoresheet did not list a penalty time; GameSheet Assistant assigned ${penalty.remaining} remaining.`);
   for(const goal of goals.filter(item=>item.scorer_inferred))warnings.push(`${goal.team} ${goal.period} ${goal.remaining}: SportsEngine did not provide a valid goal scorer; ${goal.scorer} was assigned as a placeholder. Review if another source becomes available.`);
   if(awayPlayed.length!==1&&!plans.some(plan=>plan.team===game.away_team))warnings.push(`${game.away_team}: ${awayPlayed.length} goalies played; goalie order is ambiguous and must be reviewed manually.`);
   if(homePlayed.length!==1&&!plans.some(plan=>plan.team===game.home_team))warnings.push(`${game.home_team}: ${homePlayed.length} goalies played; goalie order is ambiguous and must be reviewed manually.`);

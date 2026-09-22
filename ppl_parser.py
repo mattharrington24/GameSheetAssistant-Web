@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import hashlib
 from collections import Counter
 from typing import Any, BinaryIO
 from zipfile import BadZipFile, ZipFile
@@ -33,6 +34,19 @@ def _clock_seconds(value: str) -> int | None:
 def _clock_text(seconds: int) -> str:
     seconds = max(0, int(seconds))
     return f"{seconds // 60}:{seconds % 60:02d}"
+
+
+def _randomized_remaining(seed: str, period_length: int) -> str:
+    """Return a stable random-looking time for a missing event clock.
+
+    Keeping two minutes away from either horn avoids implausible edge times.
+    The same scoresheet row receives the same value on every re-import.
+    """
+    minimum = 2 * 60
+    maximum = max(minimum, period_length - 2 * 60)
+    digest = hashlib.sha256(seed.encode("utf-8")).digest()
+    seconds = minimum + int.from_bytes(digest[:4], "big") % (maximum - minimum + 1)
+    return _clock_text(seconds)
 
 
 def _minutes_played(value: str) -> str:
@@ -82,15 +96,15 @@ def _header_details(values: list[str]) -> tuple[str, str, str]:
     date = venue = game_number = ""
     if "DATE" in upper:
         index = upper.index("DATE")
-        if index + 1 < len(values):
-            date = values[index + 1]
+        game_index = next((i for i in range(index + 1, len(upper)) if upper[i] in {"GAME #", "GAME#", "GAME"}), len(values))
+        date = "".join(values[index + 1:game_index])
     if "LOCATION" in upper:
         start = upper.index("LOCATION") + 1
         end = upper.index("DATE", start) if "DATE" in upper[start:] else len(values)
         venue = " ".join(values[start:end])
     for index, value in enumerate(upper):
         if value in {"GAME #", "GAME#", "GAME"} and index + 1 < len(values):
-            game_number = values[index + 1]
+            game_number = "".join(values[index + 1:])
             break
     return date, venue, game_number
 
@@ -137,10 +151,6 @@ def _full_player(value: str, roster: dict[str, str]) -> str:
 def _team_for_label(label: str, home_team: str, away_team: str) -> str:
     normalized = re.sub(r"[^a-z0-9]", "", _clean(label).lower())
     matches = []
-    active_period_lengths = [
-        OVERTIME_SECONDS if period.startswith("OT") else REGULATION_SECONDS
-        for period in active_periods
-    ]
     for team in (home_team, away_team):
         words = re.findall(r"[a-z0-9]+", team.lower())
         if normalized and (normalized == "".join(words) or normalized in words or normalized == words[-1]):
@@ -231,9 +241,9 @@ def parse_ppl_docx(file_object: BinaryIO) -> dict[str, Any]:
     assist_cols = [goal_col + 3, goal_col + 5]
     strength_col = _first_run(scoring_headers, "PP/SH")
     goals: list[dict[str, Any]] = []
-    for row in rows[2:21]:
+    for row_index, row in enumerate(rows[2:21], start=2):
         period_text, remaining = row[per_col], row[time_col]
-        if not period_text.isdigit() or _clock_seconds(remaining) is None:
+        if not period_text.isdigit():
             continue
         period_index = int(period_text) - 1
         period = _period_label(period_index)
@@ -241,7 +251,13 @@ def parse_ppl_docx(file_object: BinaryIO) -> dict[str, Any]:
         team = _team_for_label(row[team_col], home_team, away_team)
         roster = rosters[team]
         assists = [_full_player(row[column], roster) for column in assist_cols[:2]]
-        goals.append({
+        time_inferred = _clock_seconds(remaining) is None
+        if time_inferred:
+            remaining = _randomized_remaining(
+                f"goal|{home_team}|{away_team}|{period}|{row[goal_col]}|{row_index}",
+                period_length,
+            )
+        goal = {
             "period": period,
             "elapsed": _clock_text(period_length - (_clock_seconds(remaining) or 0)),
             "remaining": remaining,
@@ -249,7 +265,10 @@ def parse_ppl_docx(file_object: BinaryIO) -> dict[str, Any]:
             "scorer": _full_player(row[goal_col], roster) or "Team/Unknown",
             "strength": _strength(row[strength_col]),
             "assists": [assist for assist in assists if assist],
-        })
+        }
+        if time_inferred:
+            goal["time_inferred"] = True
+        goals.append(goal)
 
     penalty_headers = rows[22]
     penalty_per_col = _first_run(penalty_headers, "Per")
@@ -260,15 +279,21 @@ def parse_ppl_docx(file_object: BinaryIO) -> dict[str, Any]:
     in_col = _first_run(penalty_headers, "In")
     out_col = _first_run(penalty_headers, "Out")
     penalties: list[dict[str, str]] = []
-    for row in rows[23:42]:
+    for row_index, row in enumerate(rows[23:42], start=23):
         period_text, remaining = row[penalty_per_col], row[in_col]
-        if not period_text.isdigit() or _clock_seconds(remaining) is None:
+        if not period_text.isdigit():
             continue
         period_index = int(period_text) - 1
         period = _period_label(period_index)
         period_length = OVERTIME_SECONDS if period.startswith("OT") else REGULATION_SECONDS
         team = _team_for_label(row[penalty_team_col], home_team, away_team)
-        penalties.append({
+        time_inferred = _clock_seconds(remaining) is None
+        if time_inferred:
+            remaining = _randomized_remaining(
+                f"penalty|{home_team}|{away_team}|{period}|{row[player_col]}|{row_index}",
+                period_length,
+            )
+        penalty = {
             "period": period,
             "elapsed": _clock_text(period_length - (_clock_seconds(remaining) or 0)),
             "remaining": remaining,
@@ -276,7 +301,10 @@ def parse_ppl_docx(file_object: BinaryIO) -> dict[str, Any]:
             "team": team,
             "player": _full_player(row[player_col], rosters[team]) or "Team/Bench",
             "penalty": _penalty_description(row[offense_col], row[minutes_col]),
-        })
+        }
+        if time_inferred:
+            penalty["time_inferred"] = True
+        penalties.append(penalty)
 
     summary_headers = rows[52]
     period_columns = []
@@ -328,6 +356,10 @@ def parse_ppl_docx(file_object: BinaryIO) -> dict[str, Any]:
     # period is explicit in the saves grid.  When one goalie has saves in only
     # one period, that row provides an unambiguous 25-minute stint and starter
     # order without relying on the missing minutes cell.
+    active_period_lengths = [
+        OVERTIME_SECONDS if period.startswith("OT") else REGULATION_SECONDS
+        for period in active_periods
+    ]
     for team in (home_team, away_team):
         team_goalies = [goalie for goalie in goalies if goalie["team"] == team]
         used_periods: set[int] = set()

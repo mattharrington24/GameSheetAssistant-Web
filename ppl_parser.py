@@ -183,6 +183,7 @@ def _period_label(index: int) -> str:
 def _penalty_description(offense: str, minutes: str) -> str:
     offense = _clean(offense) or "Minor"
     canonical_offenses = {
+        "checking": "Body Checking",
         "cross checking": "Cross-Checking",
         "cross-checking": "Cross-Checking",
         "body checking": "Body Checking",

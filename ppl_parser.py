@@ -185,14 +185,16 @@ def _penalty_description(offense: str, minutes: str) -> str:
     canonical_offenses = {
         "checking": "Body Checking",
         "cross checking": "Cross-Checking",
-        "cross-checking": "Cross-Checking",
         "body checking": "Body Checking",
         "checking from behind": "Checking From Behind",
         "high stick": "High Sticking",
-        "high-sticking": "High Sticking",
         "high sticking": "High Sticking",
     }
-    offense = canonical_offenses.get(offense.casefold(), offense)
+    # Normalize every kind of dash and punctuation Word may place between words.
+    # This keeps "Cross Checking", "Cross-Checking", and "Cross–Checking"
+    # equivalent without ever collapsing them to plain "Checking".
+    offense_key = re.sub(r"[^a-z0-9]+", " ", offense.casefold()).strip()
+    offense = canonical_offenses.get(offense_key, offense)
     length = int(minutes) if str(minutes).isdigit() else 2
     if length >= 10 or "misconduct" in offense.lower():
         kind = "Game Misconduct" if "game" in offense.lower() else "Misconduct"

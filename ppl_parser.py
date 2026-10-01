@@ -78,6 +78,16 @@ def _first_run(values: list[str], label: str) -> int:
     return starts[0]
 
 
+def _first_run_any(values: list[str], *labels: str) -> int:
+    """Return the first column matching any accepted header spelling."""
+    for label in labels:
+        starts = _run_starts(values, label)
+        if starts:
+            return starts[0]
+    accepted = " or ".join(repr(label) for label in labels)
+    raise ValueError(f"PPL scoresheet is missing the {accepted} column.")
+
+
 def _header_text(file_object: BinaryIO) -> list[str]:
     file_object.seek(0)
     try:
@@ -278,7 +288,8 @@ def parse_ppl_docx(file_object: BinaryIO) -> dict[str, Any]:
     penalty_team_col = _first_run(penalty_headers, "Team")
     player_col = _first_run(penalty_headers, "Player")
     offense_col = _first_run(penalty_headers, "Offense")
-    minutes_col = _first_run(penalty_headers, "Min.")
+    # PPL templates use both "Min." and "Min" for the penalty duration.
+    minutes_col = _first_run_any(penalty_headers, "Min.", "Min")
     in_col = _first_run(penalty_headers, "In")
     out_col = _first_run(penalty_headers, "Out")
     penalties: list[dict[str, str]] = []

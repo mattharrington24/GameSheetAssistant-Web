@@ -88,6 +88,17 @@ def _first_run_any(values: list[str], *labels: str) -> int:
     raise ValueError(f"PPL scoresheet is missing the {accepted} column.")
 
 
+def _find_section_row(rows: list[list[str]], *labels: str, start: int = 0) -> int:
+    """Find a scoresheet section by labels instead of a fixed row number."""
+    wanted = {label.casefold() for label in labels}
+    for index in range(start, len(rows)):
+        present = {value.casefold() for value in rows[index] if value}
+        if wanted.issubset(present):
+            return index
+    joined = " / ".join(labels)
+    raise ValueError(f"This Word document is missing the expected {joined} section.")
+
+
 def _header_text(file_object: BinaryIO) -> list[str]:
     file_object.seek(0)
     try:
@@ -104,17 +115,30 @@ def _header_text(file_object: BinaryIO) -> list[str]:
 def _header_details(values: list[str]) -> tuple[str, str, str]:
     upper = [value.upper() for value in values]
     date = venue = game_number = ""
+    combined = " ".join(values)
+    date_match = re.search(r"\bDATE\s+(\d{1,2}/\d{1,2}/\d{2,4})\b", combined, flags=re.I)
+    venue_match = re.search(r"\bLOCATION\s+(.+?)\s+DATE\b", combined, flags=re.I)
+    game_match = next(
+        (match for value in values if (match := re.fullmatch(r"GAME\s*#?\s*(\d+)", value, flags=re.I))),
+        None,
+    )
+    if date_match:
+        date = date_match.group(1)
+    if venue_match:
+        venue = _clean(venue_match.group(1))
+    if game_match:
+        game_number = game_match.group(1)
     if "DATE" in upper:
         index = upper.index("DATE")
         game_index = next((i for i in range(index + 1, len(upper)) if upper[i] in {"GAME #", "GAME#", "GAME"}), len(values))
-        date = "".join(values[index + 1:game_index])
+        date = date or "".join(values[index + 1:game_index])
     if "LOCATION" in upper:
         start = upper.index("LOCATION") + 1
         end = upper.index("DATE", start) if "DATE" in upper[start:] else len(values)
-        venue = " ".join(values[start:end])
+        venue = venue or " ".join(values[start:end])
     for index, value in enumerate(upper):
         if value in {"GAME #", "GAME#", "GAME"} and index + 1 < len(values):
-            game_number = "".join(values[index + 1:])
+            game_number = game_number or "".join(values[index + 1:])
             break
     return date, venue, game_number
 
@@ -233,18 +257,25 @@ def parse_ppl_docx(file_object: BinaryIO) -> dict[str, Any]:
     if not document.tables:
         raise ValueError("No scoresheet table was found in the Word document.")
     rows = [[_clean(cell.text) for cell in row.cells] for row in document.tables[0].rows]
-    if len(rows) < 55:
-        raise ValueError("This Word document does not match the expected PPL scoresheet layout.")
+    home_header_row = _find_section_row(rows, "HOME", "SCORING")
+    scoring_header_row = home_header_row + 1
+    away_header_row = _find_section_row(rows, "VIS", "PENALTIES", start=scoring_header_row)
+    penalty_header_row = away_header_row + 1
+    officials_row = _find_section_row(rows, "SCORER & OFFICIALS", start=penalty_header_row)
+    saves_header_row = _find_section_row(rows, "Saves", "TOTAL", start=officials_row)
+    summary_header_row = _find_section_row(rows, "Scoring", "FINAL", start=saves_header_row)
+    if summary_header_row + 2 >= len(rows):
+        raise ValueError("This Word document is missing the final home or visitor score row.")
 
-    home_pos = _first_run(rows[0], "Pos")
-    away_pos = _first_run(rows[21], "Pos")
-    home_team = _team_name(rows[0], "HOME", "SCORING")
-    away_team = _team_name(rows[21], "VIS", "PENALTIES")
-    home_roster = _roster(rows, 1, 21, home_pos)
-    away_roster = _roster(rows, 22, 42, away_pos)
+    home_pos = _first_run(rows[home_header_row], "Pos")
+    away_pos = _first_run(rows[away_header_row], "Pos")
+    home_team = _team_name(rows[home_header_row], "HOME", "SCORING")
+    away_team = _team_name(rows[away_header_row], "VIS", "PENALTIES")
+    home_roster = _roster(rows, scoring_header_row, away_header_row, home_pos)
+    away_roster = _roster(rows, penalty_header_row, officials_row, away_pos)
     rosters = {home_team: home_roster, away_team: away_roster}
 
-    scoring_headers = rows[1]
+    scoring_headers = rows[scoring_header_row]
     per_col = _first_run(scoring_headers, "Per")
     time_col = _first_run(scoring_headers, "Time")
     team_col = _first_run(scoring_headers, "Team")
@@ -254,7 +285,7 @@ def parse_ppl_docx(file_object: BinaryIO) -> dict[str, Any]:
     assist_cols = [goal_col + 3, goal_col + 5]
     strength_col = _first_run(scoring_headers, "PP/SH")
     goals: list[dict[str, Any]] = []
-    for row_index, row in enumerate(rows[2:21], start=2):
+    for row_index, row in enumerate(rows[scoring_header_row + 1:away_header_row], start=scoring_header_row + 1):
         period_text, remaining = row[per_col], row[time_col]
         if not period_text.isdigit():
             continue
@@ -283,7 +314,7 @@ def parse_ppl_docx(file_object: BinaryIO) -> dict[str, Any]:
             goal["time_inferred"] = True
         goals.append(goal)
 
-    penalty_headers = rows[22]
+    penalty_headers = rows[penalty_header_row]
     penalty_per_col = _first_run(penalty_headers, "Per")
     penalty_team_col = _first_run(penalty_headers, "Team")
     player_col = _first_run(penalty_headers, "Player")
@@ -293,7 +324,7 @@ def parse_ppl_docx(file_object: BinaryIO) -> dict[str, Any]:
     in_col = _first_run(penalty_headers, "In")
     out_col = _first_run(penalty_headers, "Out")
     penalties: list[dict[str, str]] = []
-    for row_index, row in enumerate(rows[23:42], start=23):
+    for row_index, row in enumerate(rows[penalty_header_row + 1:officials_row], start=penalty_header_row + 1):
         period_text, remaining = row[penalty_per_col], row[in_col]
         if not period_text.isdigit():
             continue
@@ -320,7 +351,9 @@ def parse_ppl_docx(file_object: BinaryIO) -> dict[str, Any]:
             penalty["time_inferred"] = True
         penalties.append(penalty)
 
-    summary_headers = rows[52]
+    summary_headers = rows[summary_header_row]
+    home_summary_row = rows[summary_header_row + 1]
+    away_summary_row = rows[summary_header_row + 2]
     period_columns = []
     for label in ("1st Per", "2nd Per", "3rd Per", "O.T."):
         starts = _run_starts(summary_headers, label)
@@ -328,22 +361,22 @@ def parse_ppl_docx(file_object: BinaryIO) -> dict[str, Any]:
             period_columns.append((label, starts[0]))
     active_periods = [
         _period_label(index) for index, (_, column) in enumerate(period_columns)
-        if rows[53][column].isdigit() or rows[54][column].isdigit()
+        if home_summary_row[column].isdigit() or away_summary_row[column].isdigit()
     ]
     if not active_periods:
         active_periods = sorted({goal["period"] for goal in goals} | {penalty["period"] for penalty in penalties}) or ["1st", "2nd"]
     final_col = _first_run(summary_headers, "FINAL")
-    home_score = int(rows[53][final_col]) if rows[53][final_col].isdigit() else sum(g["team"] == home_team for g in goals)
-    away_score = int(rows[54][final_col]) if rows[54][final_col].isdigit() else sum(g["team"] == away_team for g in goals)
+    home_score = int(home_summary_row[final_col]) if home_summary_row[final_col].isdigit() else sum(g["team"] == home_team for g in goals)
+    away_score = int(away_summary_row[final_col]) if away_summary_row[final_col].isdigit() else sum(g["team"] == away_team for g in goals)
 
-    saves_headers = rows[46]
+    saves_headers = rows[saves_header_row]
     save_period_columns = [_first_run(saves_headers, label) for label in ("1st Per", "2nd Per", "3rd Per", "O.T.")[:len(active_periods)]]
     total_col = _first_run(saves_headers, "TOTAL")
     ga_col = _first_run(saves_headers, "G.A.")
     minutes_col = _first_run(saves_headers, "Minutes Played")
     goalie_period_saves = {home_team: [0] * len(active_periods), away_team: [0] * len(active_periods)}
     goalies: list[dict[str, str]] = []
-    for row in rows[47:51]:
+    for row in rows[saves_header_row + 1:summary_header_row]:
         compact_label = row[0].upper().replace(" ", "")
         team = home_team if compact_label.startswith("HOME") else away_team if compact_label.startswith("VISITOR") else ""
         number_match = re.search(r"(\d+)\s*$", row[0])

@@ -183,11 +183,22 @@ def _full_player(value: str, roster: dict[str, str]) -> str:
 
 
 def _team_for_label(label: str, home_team: str, away_team: str) -> str:
-    normalized = re.sub(r"[^a-z0-9]", "", _clean(label).lower())
+    cleaned = _clean(label)
+    # Some PPL scorekeepers prefix the color with H: or V: (for example,
+    # "V: Red"). The color still has to match exactly one listed team.
+    cleaned = re.sub(r"^[HV]\s*:\s*", "", cleaned, flags=re.I)
+    normalized = re.sub(r"[^a-z0-9]", "", cleaned.lower())
+    label_words = re.findall(r"[a-z0-9]+", cleaned.lower())
     matches = []
     for team in (home_team, away_team):
         words = re.findall(r"[a-z0-9]+", team.lower())
-        if normalized and (normalized == "".join(words) or normalized in words or normalized == words[-1]):
+        aliases = {"".join(words), *words}
+        aliases.update("".join(words[index:]) for index in range(len(words)))
+        suffix_words = words[-len(label_words):] if label_words and len(label_words) <= len(words) else []
+        abbreviated_suffix = bool(suffix_words) and all(
+            team_word.startswith(label_word) for label_word, team_word in zip(label_words, suffix_words)
+        )
+        if normalized and (normalized in aliases or abbreviated_suffix):
             matches.append(team)
     if len(matches) == 1:
         return matches[0]
